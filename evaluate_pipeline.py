@@ -1,7 +1,16 @@
-"""全流程评测：训练阶段一、标定阶段三阈值，在各场景下对比方法并输出 CR、FCR、测距误差与消融结果。
+"""全流程评测：训练阶段一、标定阶段三，在各场景下对比方法并输出 CR、FCR、测距误差、消融、置信度与耗时。
 
+数据集由 simulate_dataset.py 生成（目录 data/generated，已被 git 忽略），命令如下：
+  train.npz      --n 80000 --seed 1  --rf 0.01 300  --mult 0.6 1.1
+  val.npz        --n 20000 --seed 2  --rf 0.01 300  --mult 0.6 1.1
+  test_in.npz    --n 10000 --seed 3  --rf 0.01 300  --mult 0.6 1.1
+  test_load.npz  --n 10000 --seed 4  --rf 0.01 300  --mult 1.25 1.5
+  test_rf.npz    --n 10000 --seed 5  --rf 300 1000  --mult 0.6 1.1
+  analysis.npz   --n 9000  --seed 6  --rf 0.01 300  --mult 0.6 1.1 --uniform-sections
+  test_zscale.npz --n 10000 --seed 7  --rf 0.01 300 --mult 0.6 1.1 --line-z-scale 1.1
+  test_z105.npz  --n 10000 --seed 13 --rf 0.01 300 --mult 0.6 1.1 --line-z-scale 1.05
+  test_z090.npz  --n 10000 --seed 14 --rf 0.01 300 --mult 0.6 1.1 --line-z-scale 0.9
 用法：python evaluate_pipeline.py --data data/generated --out results
-数据集由 simulate_dataset.py 生成，文件名约定见 SCENARIOS。
 """
 import argparse
 import json
@@ -12,16 +21,17 @@ import numpy as np
 
 from cross_stage_verifier import Thresholds, decide, equivalence_classes, fit_lambda
 from ieee34_bus_impedance import SENSORS, Network, add_measurement_noise
-from stage1_classifier import (adaptive_candidates, features, fit_temperature, logits_of,
-                               probabilities, train)
+from stage1_classifier import features, logits_of, probabilities, train
 from stage2_continuous_fse import ALPHAS, PhysicsModel
 
 EPS_REL = 0.02       # 线性化模型误差：相对本量测幅值的部分
 EPS_ABS = 0.01       # 线性化模型误差：相对同类量测最大幅值的部分
-# 线路阻抗假设（相对算例参数的倍数）：物理反演对每个倍数各算一遍并取残差最小者
+# 线路阻抗假设（相对算例参数的倍数）：物理反演对每个倍数各算一遍，惩罚残差加高斯先验 w·((s-1)/σ)² 后取最小者
 Z_SCALES = (0.9, 0.95, 1.0, 1.05, 1.1)
-TAG = f"r{EPS_REL}_a{EPS_ABS}_z{'-'.join(map(str, Z_SCALES))}_" + "".join(f"{n}{t}" for n, t in SENSORS)  # 物理残差缓存文件名后缀，参数变化即失效
-# 场景名 -> 数据文件
+Z_PRIOR_SIGMA = 0.05
+Z_PRIOR_WEIGHT = 1.0  # 在 ±5% 阻抗偏差验证集上网格搜索得到
+TAG = f"r{EPS_REL}_a{EPS_ABS}_z{'-'.join(map(str, Z_SCALES))}_w{Z_PRIOR_WEIGHT}_" + "".join(f"{n}{t}" for n, t in SENSORS)  # 物理残差缓存后缀
+# 场景名 -> (数据文件, 噪声倍数)
 SCENARIOS = {
     "域内": ("test_in.npz", 1.0),
     "负荷偏移": ("test_load.npz", 1.0),
@@ -57,6 +67,12 @@ def distance(net, sec, alpha):
     return np.array([net.fault_distance_km(s, a) for s, a in zip(sec, alpha)])
 
 
+def ece(conf, ok):
+    """10 等分置信度区间的期望校准误差。"""
+    bins = np.minimum((conf * 10).astype(int), 9)
+    return float(sum(abs(ok[bins == b].mean() - conf[bins == b].mean()) * (bins == b).mean() for b in range(10) if (bins == b).any()))
+
+
 def summarize(net, sec, alpha, ds, cls, stage1_top1):
     """区段按等价类判对；CR/FCR 相对阶段一 Top-1 的对错定义。"""
     ok = cls[sec] == cls[ds["sec"]]
@@ -82,7 +98,8 @@ def main():
     rows = net.sensor_rows(SENSORS)
     sigma = net.measurement_sigma(rows)
     libs = [Network(line_z_scale=z).response_library(ALPHAS) for z in Z_SCALES]
-    pm = PhysicsModel(net, libs, rows, sigma, EPS_REL, EPS_ABS)
+    prior_pen = [Z_PRIOR_WEIGHT * ((z - 1) / Z_PRIOR_SIGMA) ** 2 for z in Z_SCALES]
+    pm = PhysicsModel(net, libs, prior_pen, rows, sigma, EPS_REL, EPS_ABS)
     n_sec = len(net.sections)
 
     # ---- 阶段一训练：每个批次重新叠加噪声 ----
@@ -98,50 +115,30 @@ def main():
     model = train(make_batch, 3 * len(rows) + 1, n_sec, steps=a.steps)
     print(f"stage1 trained in {time.time() - t0:.0f}s", flush=True)
 
-    # ---- 温度校准（名义验证集）与等价类 ----
+    # ---- 等价类 ----
     val = load_set(a.data / "val.npz", net, rows, sigma, seed=101)
     lg_val = logits_of(model, features(val["z"], sigma))
-    temp = fit_temperature(lg_val, val["sec"].astype(np.int64))
     ana = load_set(a.data / "analysis.npz", net, rows, sigma, seed=303)
     pen_a = physics_cached(pm, ana["z"], a.data / f"phys_analysis_{TAG}.npz")[0]
     cls = equivalence_classes(pen_a, ana["sec"])
     print("等价类数", cls.max() + 1, [list(np.where(cls == c)[0]) for c in range(cls.max() + 1) if (cls == c).sum() > 1], flush=True)
 
-    # ---- 阶段三标定：仅名义参数的验证集，或再加入线路阻抗 ±5% 的验证集 ----
-    calib_sets = {"名义标定": ["val.npz"], "含阻抗偏差标定": ["val.npz", "val_zp.npz", "val_zm.npz"]}
-    cals = {}
-    for cal_name, files in calib_sets.items():
-        if not all((a.data / f).exists() for f in files):
-            continue
-        parts = []
-        for k, f in enumerate(files):
-            d = load_set(a.data / f, net, rows, sigma, seed=101 + k)
-            p = probabilities(logits_of(model, features(d["z"], sigma)), temp)
-            parts.append((d["sec"], p) + tuple(physics_cached(pm, d["z"], a.data / f"phys_{f[:-4]}_n1.0_{TAG}.npz")))
-        sec_c = np.concatenate([x[0] for x in parts])
-        p_c, pen_c, j_c, al_c, ft_c = (np.concatenate([x[i] for x in parts]) for i in range(1, 6))
-        j_true = j_c[np.arange(len(sec_c)), sec_c]
-        th = Thresholds(lam=fit_lambda(p_c, pen_c, cls, sec_c), eps_normal=float(np.quantile(j_true, 0.95)),
-                        j_threshold=float(np.quantile(j_true, 0.99)), tau_b=0.0, j_ref=float(np.median(j_true)))
-        order_c = np.argsort(-p_c, axis=1)[:, :6]
-        ok1_c = cls[order_c[:, 0]] == cls[sec_c]
-        best = None
-        for tau in (0.5, 1.0, 2.0, 4.0, 8.0, 16.0):
-            t = Thresholds(th.lam, th.eps_normal, th.j_threshold, tau, th.j_ref)
-            ok = cls[decide(p_c, order_c, pen_c, j_c, al_c, ft_c, cls, t)["sec"]] == cls[sec_c]
-            if (~ok[ok1_c]).mean() <= 0.015 and (best is None or ok.mean() > best[0]):
-                best = (ok.mean(), t)
-        cals[cal_name] = best[1] if best else th
-        print(cal_name, cals[cal_name], flush=True)
+    # ---- 阶段三标定：名义验证集 ----
+    p_val = probabilities(lg_val)
+    pen_v, j_v, al_v, ft_v = physics_cached(pm, val["z"], a.data / f"phys_val_n1.0_{TAG}.npz")
+    j_true = j_v[np.arange(len(val["sec"])), val["sec"]]
+    th = Thresholds(lam=fit_lambda(p_val, pen_v, cls, val["sec"]), j_threshold=float(np.quantile(j_true, 0.99)))
+    print("阶段三参数", th, flush=True)
 
-    results = {"temperature": temp, "thresholds": {k: v.__dict__ for k, v in cals.items()}, "equivalence_classes": cls.tolist()}
+    results = {"thresholds": th.__dict__, "equivalence_classes": cls.tolist()}
     for name, (fn, noise_scale) in SCENARIOS.items():
         if not (a.data / fn).exists():
             continue
         ds = load_set(a.data / fn, net, rows, sigma, seed=202, noise_scale=noise_scale)
-        p = probabilities(logits_of(model, features(ds["z"], sigma)), temp)
+        lg = logits_of(model, features(ds["z"], sigma))
+        p = probabilities(lg)
         pen, j, al, ft = physics_cached(pm, ds["z"], a.data / f"phys_{fn[:-4]}_n{noise_scale}_{TAG}.npz")
-        order = np.argsort(-p, axis=1)[:, :6]
+        order = np.argsort(-p, axis=1)
         top1 = order[:, 0]
         idx = np.arange(len(p))
         res = {}
@@ -149,21 +146,21 @@ def main():
         res["基准3 物理穷举"] = summarize(net, pen.argmin(1), al[idx, pen.argmin(1)], ds, cls, top1)
         res["基准4 Oracle"] = summarize(net, ds["sec"], al[idx, ds["sec"]], ds, cls, top1)
         res["阶段一Top-K类别召回"] = {k: float((cls[order[:, :k]] == cls[ds["sec"]][:, None]).any(1).mean()) for k in (1, 2, 3, 4, 6)}
-        for cal_name, th in cals.items():
-            full = (np.log(p + 1e-12) - th.lam * pen).argmax(1)
-            res[f"联合打分(全区段) {cal_name}"] = summarize(net, full, al[idx, full], ds, cls, top1)
-            for name_v, kw in (("联合打分(无规则)", dict(rules="")), ("联合打分+规则A", dict(rules="A")),
-                               ("联合打分+规则A+B", dict(rules="AB")), ("本方案(A+B+C)", dict(rules="ABC"))):
-                r = decide(p, order, pen, j, al, ft, cls, th, **kw)
-                res[f"{name_v} {cal_name}"] = summarize(net, r["sec"], r["alpha"], ds, cls, top1)
-                res[f"{name_v} {cal_name}"]["alarm_rate"] = float((r["rule"] == 4).mean())
-                res[f"{name_v} {cal_name}"]["rules"] = {int(k): float((r["rule"] == k).mean()) for k in range(5)}
-        th0 = cals["名义标定"]
-        res["λ扫描(名义标定,无规则)"] = {}
+        full = (np.log(p + 1e-12) - th.lam * pen).argmax(1)
+        res["联合打分(全区段,参考)"] = summarize(net, full, al[idx, full], ds, cls, top1)
+        for name_v, kw in (("联合打分(Top-2,无候选扩展)", dict(expand=False)), ("本方案(联合打分+候选扩展)", {})):
+            r = decide(p, pen, j, al, ft, cls, th, **kw)
+            res[name_v] = summarize(net, r["sec"], r["alpha"], ds, cls, top1)
+            res[name_v]["rules"] = {int(k): float((r["rule"] == k).mean()) for k in range(3)}
+            res[name_v]["ECE"] = ece(r["conf"], cls[r["sec"]] == cls[ds["sec"]])
+        r = decide(p, pen, j, al, ft, cls, th)
+        ok, hi = cls[r["sec"]] == cls[ds["sec"]], r["conf"] >= 0.6
+        res["置信度C"] = dict(高置信占比=float(hi.mean()), 高置信准确率=float(ok[hi].mean()) if hi.any() else float("nan"),
+                            低置信准确率=float(ok[~hi].mean()) if (~hi).any() else float("nan"), ECE=ece(r["conf"], ok))
+        res["λ扫描(Top-2,无候选扩展)"] = {}
         for mult in (0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0):
-            t = Thresholds(th0.lam * mult, th0.eps_normal, th0.j_threshold, th0.tau_b, th0.j_ref)
-            r = decide(p, order, pen, j, al, ft, cls, t, rules="")
-            res["λ扫描(名义标定,无规则)"][str(mult)] = summarize(net, r["sec"], r["alpha"], ds, cls, top1)
+            r = decide(p, pen, j, al, ft, cls, Thresholds(th.lam * mult, th.j_threshold), expand=False)
+            res["λ扫描(Top-2,无候选扩展)"][str(mult)] = summarize(net, r["sec"], r["alpha"], ds, cls, top1)
         results[name] = res
         print(name, json.dumps(res, ensure_ascii=False, indent=1), flush=True)
 
@@ -171,14 +168,14 @@ def main():
     ds = load_set(a.data / "test_in.npz", net, rows, sigma, seed=202)
     z = ds["z"][:1000]
     t0 = time.perf_counter()
-    p = probabilities(logits_of(model, features(z, sigma)), temp)
+    p = probabilities(logits_of(model, features(z, sigma)))
     t1 = time.perf_counter()
-    order = np.argsort(-p, axis=1)[:, :4]
+    order = np.argsort(-p, axis=1)[:, :2]
     pm.fit_candidates(z, order)
     t2 = time.perf_counter()
     pm.fit_all(z)
     t3 = time.perf_counter()
-    results["耗时_ms每样本"] = {"阶段一": (t1 - t0) * 1.0, "阶段二(Top-4候选)": (t2 - t1) * 1.0, "物理穷举(全部区段)": (t3 - t2) * 1.0}
+    results["耗时_ms每样本"] = {"阶段一": (t1 - t0) * 1.0, "阶段二(Top-2候选)": (t2 - t1) * 1.0, "物理穷举(全部区段)": (t3 - t2) * 1.0}
     print(results["耗时_ms每样本"], flush=True)
     (a.out / "evaluation.json").write_text(json.dumps(results, ensure_ascii=False, indent=1))
 

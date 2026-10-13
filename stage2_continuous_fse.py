@@ -22,8 +22,9 @@ def effective_columns(lib_s, phases, ftype):
 class PhysicsModel:
     """持有所选测点行上的响应库，对一批量测同时求各区段的最小加权残差。"""
 
-    def __init__(self, net, libs, rows, sigma_noise, eps_rel, eps_abs=0.0):
-        """libs 为不同线路阻抗假设（如 0.9/1.0/1.1 倍）下的响应库列表，每个假设都作为备选，取残差最小者。
+    def __init__(self, net, libs, prior_pen, rows, sigma_noise, eps_rel, eps_abs=0.0):
+        """libs 为不同线路阻抗假设（如 0.9/1.0/1.1 倍）下的响应库列表，prior_pen 为各假设的先验惩罚（加在惩罚残差上），
+        每个假设都作为备选，取惩罚残差最小者；报告的残差 J 不含先验惩罚。
 
         噪声方差之外，模型误差方差为 (eps_rel·|z_i|)² + (eps_abs·同类量测的最大幅值)²。
         """
@@ -35,7 +36,7 @@ class PhysicsModel:
         self.hyp = []
         for k, s in enumerate(net.sections):
             per_type = []
-            for lib in libs:
+            for lib, extra in zip(libs, prior_pen):
                 ls = lib[k][:, rows, :]
                 for t in valid_types(s["phases"]):
                     g = effective_columns(ls, s["phases"], t)
@@ -43,7 +44,7 @@ class PhysicsModel:
                     j, m, p = g.shape
                     gg = np.einsum("jmp,jmq->mjpq", g.conj(), g).reshape(m, -1)
                     gc = np.einsum("jmp->mjp", g.conj()).reshape(m, -1)
-                    per_type.append((t, p, gg, gc))
+                    per_type.append((t, p, gg, gc, extra))
             self.hyp.append(per_type)
 
     def fit_section(self, sec, z):
@@ -56,7 +57,7 @@ class PhysicsModel:
         best = [np.zeros(n), np.zeros(n), np.zeros(n, dtype=int)]
         z2 = (w2 * np.abs(z) ** 2).sum(1)
         wz = w2 * z
-        for t, p, gg, gc in self.hyp[sec]:
+        for t, p, gg, gc, extra in self.hyp[sec]:
             j = len(ALPHAS)
             mmat = (w2 @ gg).reshape(n, j, p, p)
             b = (wz @ gc).reshape(n, j, p)
@@ -65,7 +66,7 @@ class PhysicsModel:
             jres = np.maximum(z2[:, None] - np.einsum("njp,njp->nj", b.conj(), x).real, 0.0)
             ia = jres.argmin(1)
             jmin = jres[np.arange(n), ia]
-            pen = jmin + 4.0 * p
+            pen = jmin + 4.0 * p + extra
             upd = pen < best_pen
             best_pen[upd] = pen[upd]
             best[0][upd] = jmin[upd]
