@@ -19,20 +19,20 @@ def features(z, sigma):
     return np.concatenate([u.real, u.imag, np.clip(snr, -3, 6), ref_snr], 1).astype(np.float32)
 
 
-def build_model(n_in, n_classes):
+def build_model(n_in, n_classes, hidden=None):
     layers, d = [], n_in
-    for h in HIDDEN:
+    for h in hidden or HIDDEN:
         layers += [nn.Linear(d, h), nn.ReLU()]
         d = h
     layers.append(nn.Linear(d, n_classes))
     return nn.Sequential(*layers)
 
 
-def train(make_batch, n_in, n_classes, steps=6000, batch=512, lr=2e-3, seed=0):
+def train(make_batch, n_in, n_classes, steps=6000, batch=512, lr=2e-3, seed=0, hidden=None):
     """make_batch(batch) 返回 (特征 float32, 标签 int64)，每次重新叠加噪声。"""
     torch.manual_seed(seed)
     torch.set_num_threads(1)  # 单线程使训练结果可复现（多线程归约顺序不固定）
-    model = build_model(n_in, n_classes)
+    model = build_model(n_in, n_classes, hidden)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps)
     loss_fn = nn.CrossEntropyLoss()

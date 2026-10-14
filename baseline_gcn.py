@@ -23,7 +23,8 @@ from scipy.sparse.csgraph import dijkstra
 from torch import nn
 
 from evaluate_pipeline import SCENARIOS, load_set
-from ieee34_bus_impedance import SENSORS, Network, add_measurement_noise
+from ieee34_bus_impedance import CASES, Network, add_measurement_noise
+from simulate_dataset import read_sensor_data
 from stage1_classifier import features
 
 CONV_K = (3, 4, 5)
@@ -54,11 +55,11 @@ def bus_graph(net, kn):
     return buses, (2 * lap / lam_max - np.eye(n)).astype(np.float32)
 
 
-def sensor_slots(net, buses):
+def sensor_slots(net, buses, sensors):
     """量测列（与 sensor_rows 的顺序一致）→ (母线序号, 种类 0 电压/1 电流, 相别 0..2)。"""
     idx = {b: i for i, b in enumerate(buses)}
     slots = []
-    for name, term in SENSORS:
+    for name, term in sensors:
         s = net.sections[net.section_index[name]]
         bus = idx[s["bus1"] if term == 0 else s["bus2"]]
         slots += [(bus, kind, ph - 1) for kind in (0, 1) for ph in s["phases"]]
@@ -68,9 +69,9 @@ def sensor_slots(net, buses):
 class InputBuilder:
     """把一批量测变成 (样本数, 母线数, 特征数) 的图信号，并按训练集标准化。"""
 
-    def __init__(self, net, buses, mode, rows, sigma, train, rng):
+    def __init__(self, net, buses, sensors, mode, sigma, train, rng):
         self.mode, self.sigma, self.nb = mode, sigma, len(buses)
-        self.slots = sensor_slots(net, buses)
+        self.slots = sensor_slots(net, buses, sensors)
         self.nf = F_PAPER if mode == "gcn" else F_DELTA
         self.mask = np.zeros((self.nb, self.nf), dtype=bool)
         for bus, kind, ph in self.slots:
@@ -188,12 +189,8 @@ def predict_probs(model, builder, z):
 
 
 def load_raw(path, rows):
-    """返回 sec、测点行的突变量 zc 与故障前相量 pre；原始数据集与 --prepare 的输出都可读。"""
-    with np.load(path) as f:
-        d = {k: f[k] for k in f.files}
-    if "zc" not in d:
-        d["zc"] = np.concatenate([d["dv"], d["di"]], 1)[:, rows].astype(complex)
-        d["pre"] = np.concatenate([d["v0"], d["i0"]], 1)[:, rows].astype(complex)
+    """返回 sec、alpha、测点行的突变量 zc 与故障前相量 pre。"""
+    d = read_sensor_data(path, rows)
     return {k: d[k] for k in ("sec", "alpha", "zc", "pre")}
 
 
@@ -215,37 +212,46 @@ def main():
     ap.add_argument("--modes", nargs="+", default=["gcn", "gcn_delta"])
     ap.add_argument("--val-only", action="store_true", help="只在验证集上评估，用于选择超参数")
     ap.add_argument("--export-probs", type=Path, help="gcn_delta 模式：导出验证集（val、val_gcn）与各场景（与评测脚本相同的带噪观测）上的区段概率")
+    ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34")
     ap.add_argument("--prepare", nargs=2, type=Path, metavar=("SRC", "DST"), help="从含 v0、i0 的数据集提取测点量测行")
     a = ap.parse_args()
 
-    net = Network()
-    rows = net.sensor_rows(SENSORS)
+    case = CASES[a.case]
+    fp = (lambda name: a.data / name) if a.case == "ieee34" else (lambda name: a.data / f"{a.case}_{name}")
+    net = Network(case=case)
+    rows = net.sensor_rows(case["sensors"])
     if a.prepare:
         prepare(*a.prepare, rows)
         return
     sigma = net.measurement_sigma(rows)
     buses, lap = bus_graph(net, a.kn)
     print(f"图：{len(buses)} 个母线，Kn={a.kn}", flush=True)
-    train = load_raw(a.data / "train_gcn.npz", rows)
-    cls = np.array(json.loads(Path("results/evaluation.json").read_text())["equivalence_classes"])
+    train = load_raw(fp("train_gcn.npz" if a.case == "ieee34" else "train.npz"), rows)
+    eval_json = Path("results/evaluation.json") if a.case == "ieee34" else Path(f"results/{a.case}/evaluation.json")
     n_sec = len(net.sections)
 
     results = {"kn": a.kn, "filters": a.filters, "steps": a.steps}
     for mode in a.modes:
-        builder = InputBuilder(net, buses, mode, rows, sigma, train, np.random.default_rng(1))
+        builder = InputBuilder(net, buses, case["sensors"], mode, sigma, train, np.random.default_rng(1))
         model = train_gcn(builder, lap, train, n_sec, a.filters, a.steps, a.batch, a.lr)
         res = {}
+        # 等价类来自 evaluate_pipeline.py；仅 --val-only 调参时允许缺省
+        cls = np.array(json.loads(eval_json.read_text())["equivalence_classes"]) if eval_json.exists() else None
+        if cls is None and not a.val_only:
+            raise FileNotFoundError(f"缺少等价类文件 {eval_json}，请先运行 evaluate_pipeline.py")
         if a.val_only:
-            d = load_raw(a.data / "val_gcn.npz", rows)
+            d = load_raw(fp("val_gcn.npz" if a.case == "ieee34" else "val.npz"), rows)
             sec = predict(model, builder, d, 1.0, seed=202)
-            res["验证集"] = dict(section_acc=float((sec == d["sec"]).mean()), class_acc=float((cls[sec] == cls[d["sec"]]).mean()))
+            res["验证集"] = dict(section_acc=float((sec == d["sec"]).mean()))
+            if cls is not None:
+                res["验证集"]["class_acc"] = float((cls[sec] == cls[d["sec"]]).mean())
             print(mode, res["验证集"], flush=True)
         for name in [] if a.val_only else SCENARIOS:
             fn, noise_scale = SCENARIOS[name]
-            if not (a.data / fn).exists():
+            if not fp(fn).exists():
                 continue
-            d = load_raw(a.data / fn, rows)
-            ds = load_set(a.data / fn, net, rows, sigma, seed=202)
+            d = load_raw(fp(fn), rows)
+            ds = load_set(fp(fn), net, rows, sigma, seed=202)
             sec = predict(model, builder, d, noise_scale, seed=202)
             d_pred = np.array([net.fault_distance_km(s, 0.5) for s in sec])
             d_orc = np.array([net.fault_distance_km(s, 0.5) for s in ds["sec"]])
@@ -258,12 +264,13 @@ def main():
             print(mode, name, json.dumps(res[name], ensure_ascii=False), flush=True)
         results[mode] = res
         if a.export_probs and mode == "gcn_delta":
-            probs = {"val": predict_probs(model, builder, load_set(a.data / "val.npz", net, rows, sigma, seed=101)["z"])}
+            probs = {"val": predict_probs(model, builder, load_set(fp("val.npz"), net, rows, sigma, seed=101)["z"])}
             for name, (fn, noise_scale) in SCENARIOS.items():
-                if (a.data / fn).exists():
-                    probs[name] = predict_probs(model, builder, load_set(a.data / fn, net, rows, sigma, seed=202, noise_scale=noise_scale)["z"])
-            d = load_raw(a.data / "val_gcn.npz", rows)   # 带故障前相量的验证集，供非线性精化标定
-            probs["val_gcn"] = predict_probs(model, builder, add_measurement_noise(np.random.default_rng(101), d["zc"], sigma))
+                if fp(fn).exists():
+                    probs[name] = predict_probs(model, builder, load_set(fp(fn), net, rows, sigma, seed=202, noise_scale=noise_scale)["z"])
+            if a.case == "ieee34":   # 带故障前相量的验证集，供非线性精化标定
+                d = load_raw(fp("val_gcn.npz"), rows)
+                probs["val_gcn"] = predict_probs(model, builder, add_measurement_noise(np.random.default_rng(101), d["zc"], sigma))
             np.savez_compressed(a.export_probs, **probs)
     if not a.val_only:
         a.out.write_text(json.dumps(results, ensure_ascii=False, indent=1))

@@ -136,6 +136,17 @@ def sample_records(rng, sections, n, rf_range, mult_range, by_length=True, no_fa
     return recs
 
 
+def read_sensor_data(path, rows):
+    """读取数据集在测点量测行 rows 上的突变量 zc 与故障前相量 pre（缺 v0、i0 时为 None），并附标签。
+    原始数据集（dv、di、v0、i0 为全网）与 --sensors 生成的精简数据集（只存 zc、pre）都可读。"""
+    with np.load(path) as f:
+        d = {k: f[k] for k in f.files}
+    if "zc" not in d:
+        d["zc"] = np.concatenate([d["dv"], d["di"]], 1)[:, rows].astype(complex)
+        d["pre"] = np.concatenate([d["v0"], d["i0"]], 1)[:, rows].astype(complex) if "v0" in d else None
+    return {k: d[k] for k in ("sec", "alpha", "ftype", "rf", "load_mult", "zc", "pre") if k in d}
+
+
 _sim = None
 _line_z_scale = 1.0
 _fixed_taps = False
@@ -188,10 +199,16 @@ if __name__ == "__main__":
     ap.add_argument("--fixed-taps", action="store_true", help="调压器档位固定在名义负荷下的位置")
     ap.add_argument("--line-z-scale", type=float, default=1.0, help="仿真线路串联阻抗相对建模参数的倍数")
     ap.add_argument("--uniform-sections", action="store_true", help="各区段等概率而非按长度加权")
+    ap.add_argument("--sensors", action="store_true", help="只保存该算例测点行上的突变量 zc 与故障前相量 pre（大系统用，省空间）")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     a.out = a.out.resolve()  # OpenDSS 编译会切换工作目录
     data = generate(a.n, a.seed, a.rf, a.mult, a.workers, not a.uniform_sections, a.line_z_scale, a.fixed_taps, CASES[a.case], a.rf_uniform, tuple(a.alpha))
     a.out.parent.mkdir(parents=True, exist_ok=True)
+    if a.sensors:
+        rows = Network(case=CASES[a.case]).sensor_rows(CASES[a.case]["sensors"])
+        zc = np.concatenate([data["dv"], data["di"]], 1)[:, rows]
+        pre = np.concatenate([data["v0"], data["i0"]], 1)[:, rows]
+        data = {k: v for k, v in data.items() if k not in ("dv", "di", "v0", "i0")} | dict(zc=zc, pre=pre)
     np.savez_compressed(a.out, **data)
     print(f"saved {a.n} samples -> {a.out}")

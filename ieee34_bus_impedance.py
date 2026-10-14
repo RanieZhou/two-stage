@@ -23,10 +23,18 @@ IEEE33 = dict(
     dss=Path(__file__).parent / "data/ieee33/ieee33.dss",
     non_section=(), root="1", slack=("1",), no_fault=("l1",),
 )
-CASES = {"ieee34": IEEE34, "ieee33": IEEE33}
+# IEEE 123 节点系统（OpenDSS 测试算例库）：6 个常闭开关与 2 个常开开关（Sw1–Sw8）为短连接线，不作故障区段；电源接在母线 150
+IEEE123 = dict(
+    dss=Path(__file__).parent / "data/ieee123/IEEE123Master.dss",
+    non_section=tuple(f"sw{i}" for i in range(1, 9)), root="150", slack=("150",), no_fault=(),
+    # 8 个测点：select_sensors.py 贪心选取（results/sensor_selection_ieee123.json 前 8 步），位于母线 60、47、95、1、108、27、81、30
+    sensors=[('l58', 1), ('l45', 1), ('l94', 1), ('l115', 1), ('l105', 1), ('l29', 0), ('l81', 1), ('l32', 0)],
+)
+CASES = {"ieee34": IEEE34, "ieee33": IEEE33, "ieee123": IEEE123}
 # 5 个测点：(线路名, 端子)，端子 0 为 bus1 端、1 为 bus2 端；每个测点量测该端母线各相电压与该端线路电流。
 # 选点依据：以物理穷举定位的平均测距误差为目标做贪心前向选择，5 个测点位于互不相同的母线。
 SENSORS = [("l6", 1), ("l30", 1), ("l2", 0), ("l11", 1), ("l29", 1)]
+IEEE34["sensors"] = SENSORS
 
 
 def load_circuit(load_mult=1.0, fix_taps=True, case=IEEE34):

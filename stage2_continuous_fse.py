@@ -22,13 +22,14 @@ def effective_columns(lib_s, phases, ftype):
 class PhysicsModel:
     """持有所选测点行上的响应库，对一批量测同时求各区段的最小加权残差。"""
 
-    def __init__(self, net, libs, prior_pen, rows, sigma_noise, eps_rel, eps_abs=0.0):
+    def __init__(self, net, libs, prior_pen, rows, sigma_noise, eps_rel, eps_abs=0.0, alphas=ALPHAS):
         """libs 为不同线路阻抗假设（如 0.9/1.0/1.1 倍）下的响应库列表，prior_pen 为各假设的先验惩罚（加在惩罚残差上），
         每个假设都作为备选，取惩罚残差最小者；报告的残差 J 不含先验惩罚。
 
         噪声方差之外，模型误差方差为 (eps_rel·|z_i|)² + (eps_abs·同类量测的最大幅值)²。
         """
         self.net = net
+        self.alphas = alphas
         self.sigma2 = sigma_noise ** 2
         self.eps_rel2 = eps_rel ** 2
         self.eps_abs2 = eps_abs ** 2
@@ -61,7 +62,7 @@ class PhysicsModel:
         z2 = (w2 * np.abs(z) ** 2).sum(1)
         wz = w2 * z
         for t, p, gg, gc, extra in self.hyp[sec]:
-            j = len(ALPHAS)
+            j = len(self.alphas)
             mmat = (w2 @ gg).reshape(n, j, p, p)
             b = (wz @ gc).reshape(n, j, p)
             ridge = 1e-9 * np.einsum("njpp->nj", mmat).real + 1e-300
@@ -73,7 +74,7 @@ class PhysicsModel:
             upd = pen < best_pen
             best_pen[upd] = pen[upd]
             best[0][upd] = jmin[upd]
-            best[1][upd] = _refine_alpha(jres[upd], ia[upd])
+            best[1][upd] = _refine_alpha(jres[upd], ia[upd], self.alphas)
             best[2][upd] = t
         return best_pen, best[0], best[1], best[2]
 
@@ -98,7 +99,7 @@ class PhysicsModel:
         return outs
 
 
-def _refine_alpha(jres, ia):
+def _refine_alpha(jres, ia, alphas=ALPHAS):
     """对残差曲线最小点做抛物线插值，得到连续 α。"""
     n, jn = jres.shape
     i0 = np.clip(ia, 1, jn - 2)
@@ -106,6 +107,6 @@ def _refine_alpha(jres, ia):
     den = y0 - 2 * y1 + y2
     off = np.where(den > 1e-12, 0.5 * (y0 - y2) / np.where(den > 1e-12, den, 1.0), 0.0)
     off = np.clip(off, -1, 1)
-    step = ALPHAS[1] - ALPHAS[0]
+    step = alphas[1] - alphas[0]
     edge = (ia == 0) | (ia == jn - 1)
-    return np.where(edge, ALPHAS[ia], np.clip(ALPHAS[i0] + off * step, ALPHAS[0], ALPHAS[-1]))
+    return np.where(edge, alphas[ia], np.clip(alphas[i0] + off * step, alphas[0], alphas[-1]))

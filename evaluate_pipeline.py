@@ -20,17 +20,21 @@
   python evaluate_pipeline.py --stage1-probs data/generated/gcn_delta_probs.npz --out results/gcn_stage1
   加 --ensemble 则取 MLP 与 GCN 概率的平均（--out results/ensemble_stage1）
 非线性精化（每个场景前 N 个样本，耗时长）：python evaluate_pipeline.py --refine 600 --out results/refine
+IEEE 123（数据文件名带 ieee123_ 前缀）：python evaluate_pipeline.py --case ieee123 --hidden 256 256 192 --steps 15000 --k 0 --out results/ieee123
 """
 import argparse
 import json
 import time
+from multiprocessing import Pool
 from pathlib import Path
 
 import numpy as np
+from threadpoolctl import threadpool_limits
 
 from baseline_l1 import TOP_K, L1Locator, greedy_pmu_placement, noisy_dv, run_l1
 from cross_stage_verifier import Thresholds, decide, equivalence_classes, fit_lambda
-from ieee34_bus_impedance import SENSORS, Network, add_measurement_noise
+from ieee34_bus_impedance import CASES, Network, add_measurement_noise
+from simulate_dataset import read_sensor_data
 from stage1_classifier import features, logits_of, probabilities, train
 from scipy.optimize import minimize_scalar
 from scipy.special import logsumexp
@@ -44,7 +48,14 @@ EPS_ABS = 0.01       # 线性化模型误差：相对同类量测最大幅值的
 Z_SCALES = (0.9, 0.95, 1.0, 1.05, 1.1)
 Z_PRIOR_SIGMA = 0.05
 Z_PRIOR_WEIGHT = 1.0  # 在 ±5% 阻抗偏差验证集上网格搜索得到
-TAG = f"r{EPS_REL}_a{EPS_ABS}_z{'-'.join(map(str, Z_SCALES))}_w{Z_PRIOR_WEIGHT}_" + "".join(f"{n}{t}" for n, t in SENSORS)  # 物理残差缓存后缀
+
+
+def phys_tag(sensors):
+    """物理残差缓存的文件名后缀：模型参数与测点。"""
+    return f"r{EPS_REL}_a{EPS_ABS}_z{'-'.join(map(str, Z_SCALES))}_w{Z_PRIOR_WEIGHT}_" + "".join(f"{n}{t}" for n, t in sensors)
+
+
+
 # 场景名 -> (数据文件, 噪声倍数)
 SCENARIOS = {
     "域内": ("test_in.npz", 1.0),
@@ -66,8 +77,8 @@ L1_PREFIX = "固定档位"
 
 
 def load_set(path, net, rows, sigma, seed, noise_scale=1.0):
-    d = np.load(path)
-    zc = np.concatenate([d["dv"], d["di"]], 1)[:, rows].astype(complex)
+    d = read_sensor_data(path, rows)
+    zc = d["zc"]
     rng = np.random.default_rng(seed)
     return dict(
         zc=zc, z=add_measurement_noise(rng, zc, sigma, noise_scale),
@@ -76,11 +87,27 @@ def load_set(path, net, rows, sigma, seed, noise_scale=1.0):
     )
 
 
+_pm = None
+
+
+def _fit_chunk(z):
+    return _pm.fit_all(z)
+
+
+def fit_all_parallel(pm, z, workers=4, chunk=250):
+    """把样本分块并行求全部区段的物理反演（各进程单线程）。"""
+    global _pm
+    _pm = pm
+    with threadpool_limits(1), Pool(workers) as pool:
+        parts = pool.map(_fit_chunk, np.array_split(z, max(1, len(z) // chunk)))
+    return [np.concatenate([p[k] for p in parts]) for k in range(4)]
+
+
 def physics_cached(pm, z, cache):
     if cache.exists():
         c = np.load(cache)
         return [c[k] for k in ("pen", "j", "alpha", "ftype")]
-    out = pm.fit_all(z)
+    out = fit_all_parallel(pm, z)
     np.savez_compressed(cache, pen=out[0], j=out[1], alpha=out[2], ftype=out[3])
     return out
 
@@ -195,33 +222,38 @@ def main():
     ap.add_argument("--stage1-probs", type=Path, help="用外部阶段一（如 GCN）导出的区段概率 npz 替换 MLP 的概率")
     ap.add_argument("--ensemble", action="store_true", help="与 --stage1-probs 合用：阶段一概率取 MLP 与外部概率的算术平均")
     ap.add_argument("--refine", type=int, default=0, help="每个场景取前 N 个样本做非线性精化评测（耗时），0 为不做")
+    ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34", help="算例；ieee123 的数据文件名带 ieee123_ 前缀，不运行 L1")
+    ap.add_argument("--k", type=int, default=2, help="阶段一候选区段数；0 为在验证集上从 2、3、5 中选联合决策区段准确率最高者")
+    ap.add_argument("--hidden", type=int, nargs=3, default=None, help="阶段一 MLP 隐层宽度，默认 160 160 96")
     ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），不运行 L1")
     a = ap.parse_args()
     a.out.mkdir(exist_ok=True)
 
-    net = Network()
-    rows = net.sensor_rows(SENSORS)
-    tag = TAG
+    case = CASES[a.case]
+    fp = (lambda name: a.data / name) if a.case == "ieee34" else (lambda name: a.data / f"{a.case}_{name}")   # 数据与缓存文件路径
+    net = Network(case=case)
+    rows = net.sensor_rows(case["sensors"])
+    tag = phys_tag(case["sensors"])
     if a.voltage_only:
         rows = rows[rows < len(net.nodes)]
         tag += "_V"
-    else:
+    elif a.case == "ieee34":
         # L1 两种测点：与本方案相同的 5 个测点母线；L1 按自身布点目标（前 k 命中率）选取的 5 个母线
         l1_same = L1Locator(net, [net.nodes[r] for r in rows if r < len(net.nodes)])
-        with np.load(a.data / "analysis.npz") as f:
+        with np.load(fp("analysis.npz")) as f:
             own_nodes, own_buses = greedy_pmu_placement(net, f["dv"][:3000].astype(complex), f["sec"][:3000])
         l1_own = L1Locator(net, own_nodes)
         print("L1 自身布点母线", own_buses, flush=True)
     sigma = net.measurement_sigma(rows)
     isv = rows < len(net.nodes)
-    libs = [Network(line_z_scale=z).response_library(ALPHAS) for z in Z_SCALES]
+    libs = [Network(line_z_scale=z, case=case).response_library(ALPHAS) for z in Z_SCALES]
     prior_pen = [Z_PRIOR_WEIGHT * ((z - 1) / Z_PRIOR_SIGMA) ** 2 for z in Z_SCALES]
     pm = PhysicsModel(net, libs, prior_pen, rows, sigma, EPS_REL, EPS_ABS)
     n_sec = len(net.sections)
 
     # ---- 阶段一训练：每个批次重新叠加噪声 ----
-    tr = np.load(a.data / "train.npz")
-    zc_tr = np.concatenate([tr["dv"], tr["di"]], 1)[:, rows].astype(complex)
+    tr = read_sensor_data(fp("train.npz"), rows)
+    zc_tr = tr["zc"]
     rng = np.random.default_rng(0)
 
     def make_batch(b):
@@ -229,26 +261,31 @@ def main():
         return features(add_measurement_noise(rng, zc_tr[i], sigma), sigma), tr["sec"][i].astype(np.int64)
 
     t0 = time.time()
-    model = train(make_batch, 3 * len(rows) + 1, n_sec, steps=a.steps)
+    model = train(make_batch, 3 * len(rows) + 1, n_sec, steps=a.steps, hidden=tuple(a.hidden) if a.hidden else None)
     print(f"stage1 trained in {time.time() - t0:.0f}s", flush=True)
 
     # ---- 等价类 ----
-    val = load_set(a.data / "val.npz", net, rows, sigma, seed=101)
+    val = load_set(fp("val.npz"), net, rows, sigma, seed=101)
     lg_val = logits_of(model, features(val["z"], sigma))
-    ana = load_set(a.data / "analysis.npz", net, rows, sigma, seed=303)
-    pen_a = physics_cached(pm, ana["z"], a.data / f"phys_analysis_{tag}.npz")[0]
+    ana = load_set(fp("analysis.npz"), net, rows, sigma, seed=303)
+    pen_a = physics_cached(pm, ana["z"], fp(f"phys_analysis_{tag}.npz"))[0]
     cls = equivalence_classes(pen_a, ana["sec"])
     print("等价类数", cls.max() + 1, [list(np.where(cls == c)[0]) for c in range(cls.max() + 1) if (cls == c).sum() > 1], flush=True)
 
     # ---- 阶段三标定：名义验证集 ----
     ext = np.load(a.stage1_probs) if a.stage1_probs else None
     p_val = probabilities(lg_val) if ext is None else (ext["val"] + probabilities(lg_val)) / 2 if a.ensemble else ext["val"]
-    pen_v, j_v, al_v, ft_v = physics_cached(pm, val["z"], a.data / f"phys_val_n1.0_{tag}.npz")
+    pen_v, j_v, al_v, ft_v = physics_cached(pm, val["z"], fp(f"phys_val_n1.0_{tag}.npz"))
     j_true = j_v[np.arange(len(val["sec"])), val["sec"]]
     th = Thresholds(lam=fit_lambda(p_val, pen_v, cls, val["sec"]), j_threshold=float(np.quantile(j_true, 0.99)))
     print("阶段三参数", th, flush=True)
 
-    results = {"thresholds": th.__dict__, "equivalence_classes": cls.tolist()}
+    k = a.k
+    if k == 0:
+        val_acc = {kk: (cls[decide(p_val, pen_v, j_v, al_v, ft_v, cls, th, k=kk)["sec"]] == cls[val["sec"]]).mean() for kk in (2, 3, 5)}
+        k = max(val_acc, key=val_acc.get)
+        print("验证集联合决策区段准确率", val_acc, "取 k =", k, flush=True)
+    results = {"thresholds": th.__dict__, "equivalence_classes": cls.tolist(), "k": k}
     stage = "mlp" if ext is None else "ens" if a.ensemble else "gcn"
     if a.refine:  # 非线性残差的权重 λ_nl：在带故障前相量的验证集（val_gcn）前 N 个样本上标定
         vg = np.load(a.data / "val_gcn.npz")
@@ -266,13 +303,13 @@ def main():
     if a.voltage_only:  # 仅电压的等价类更粗，另按含电流配置的 22 类划分统计区段准确率，便于与其余方法同口径比较
         cls_ref = np.array(json.loads((Path("results") / "evaluation.json").read_text())["equivalence_classes"])
     for name, (fn, noise_scale) in SCENARIOS.items():
-        if not (a.data / fn).exists():
+        if not fp(fn).exists():
             continue
-        ds = load_set(a.data / fn, net, rows, sigma, seed=202, noise_scale=noise_scale)
+        ds = load_set(fp(fn), net, rows, sigma, seed=202, noise_scale=noise_scale)
         p = probabilities(logits_of(model, features(ds["z"], sigma)))
         if ext is not None:
             p = (ext[name] + p) / 2 if a.ensemble else ext[name]
-        pen, j, al, ft = physics_cached(pm, ds["z"], a.data / f"phys_{fn[:-4]}_n{noise_scale}_{tag}.npz")
+        pen, j, al, ft = physics_cached(pm, ds["z"], fp(f"phys_{fn[:-4]}_n{noise_scale}_{tag}.npz"))
         order = np.argsort(-p, axis=1)
         top1 = order[:, 0]
         idx = np.arange(len(p))
@@ -280,15 +317,15 @@ def main():
         res["基准1 硬串联"] = summarize(net, top1, al[idx, top1], ds, cls, top1)
         res["基准3 物理穷举"] = summarize(net, pen.argmin(1), al[idx, pen.argmin(1)], ds, cls, top1)
         res["基准4 Oracle"] = summarize(net, ds["sec"], al[idx, ds["sec"]], ds, cls, top1)
-        res["阶段一Top-K类别召回"] = {k: float((cls[order[:, :k]] == cls[ds["sec"]][:, None]).any(1).mean()) for k in (1, 2, 3, 4, 6)}
+        res["阶段一Top-K类别召回"] = {k: float((cls[order[:, :k]] == cls[ds["sec"]][:, None]).any(1).mean()) for k in (1, 2, 3, 4, 5, 6, 10)}
         full = (np.log(p + 1e-12) - th.lam * pen).argmax(1)
         res["联合打分(全区段,参考)"] = summarize(net, full, al[idx, full], ds, cls, top1)
-        for name_v, kw in (("联合打分(Top-2,无候选扩展)", dict(expand=False)), ("本方案(联合打分+候选扩展)", {})):
-            r = decide(p, pen, j, al, ft, cls, th, **kw)
+        for name_v, kw in ((f"联合打分(Top-{k},无候选扩展)", dict(expand=False)), ("本方案(联合打分+候选扩展)", {})):
+            r = decide(p, pen, j, al, ft, cls, th, k=k, **kw)
             res[name_v] = summarize(net, r["sec"], r["alpha"], ds, cls, top1)
             res[name_v]["rules"] = {int(k): float((r["rule"] == k).mean()) for k in range(3)}
             res[name_v]["ECE"] = ece(r["conf"], cls[r["sec"]] == cls[ds["sec"]])
-        r = decide(p, pen, j, al, ft, cls, th)
+        r = decide(p, pen, j, al, ft, cls, th, k=k)
         ok, hi = cls[r["sec"]] == cls[ds["sec"]], r["conf"] >= 0.6
         if a.voltage_only:
             res["基准1 硬串联"]["class_acc_22类"] = float((cls_ref[top1] == cls_ref[ds["sec"]]).mean())
@@ -304,25 +341,25 @@ def main():
                                   a.data / f"l1own_{fn[:-4]}_n{noise_scale}_k{TOP_K}.npz"))
         if a.refine:
             res["非线性精化"] = refinement_report(a, net, rows, sigma, name, fn, noise_scale, stage, ds, p, al, ft, r, lam_nl, cls, top1)
-        res["λ扫描(Top-2,无候选扩展)"] = {}
+        res[f"λ扫描(Top-{k},无候选扩展)"] = {}
         for mult in (0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0):
-            r = decide(p, pen, j, al, ft, cls, Thresholds(th.lam * mult, th.j_threshold), expand=False)
-            res["λ扫描(Top-2,无候选扩展)"][str(mult)] = summarize(net, r["sec"], r["alpha"], ds, cls, top1)
+            r = decide(p, pen, j, al, ft, cls, Thresholds(th.lam * mult, th.j_threshold), k=k, expand=False)
+            res[f"λ扫描(Top-{k},无候选扩展)"][str(mult)] = summarize(net, r["sec"], r["alpha"], ds, cls, top1)
         results[name] = res
         print(name, json.dumps(res, ensure_ascii=False, indent=1), flush=True)
 
     # ---- 推断耗时：1000 个域内样本 ----
-    ds = load_set(a.data / "test_in.npz", net, rows, sigma, seed=202)
+    ds = load_set(fp("test_in.npz"), net, rows, sigma, seed=202)
     z = ds["z"][:1000]
     t0 = time.perf_counter()
     p = probabilities(logits_of(model, features(z, sigma)))
     t1 = time.perf_counter()
-    order = np.argsort(-p, axis=1)[:, :2]
+    order = np.argsort(-p, axis=1)[:, :k]
     pm.fit_candidates(z, order)
     t2 = time.perf_counter()
     pm.fit_all(z)
     t3 = time.perf_counter()
-    results["耗时_ms每样本"] = {"阶段一": (t1 - t0) * 1.0, "阶段二(Top-2候选)": (t2 - t1) * 1.0, "物理穷举(全部区段)": (t3 - t2) * 1.0}
+    results["耗时_ms每样本"] = {"阶段一": (t1 - t0) * 1.0, f"阶段二(Top-{k}候选)": (t2 - t1) * 1.0, "物理穷举(全部区段)": (t3 - t2) * 1.0}
     print(results["耗时_ms每样本"], flush=True)
     (a.out / "evaluation.json").write_text(json.dumps(results, ensure_ascii=False, indent=1))
 
