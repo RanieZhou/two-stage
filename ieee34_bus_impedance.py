@@ -263,8 +263,9 @@ class Network:
             off += 2 * c
         return node_index, cur_off, off
 
-    def response(self, sec, alpha):
-        """区段 sec 的 alpha 处各故障相单位注入电流引起的全部测量量突变，形状 (测量数, 故障相数)。"""
+    def response(self, sec, alpha, with_zff=False):
+        """区段 sec 的 alpha 处各故障相单位注入电流引起的全部测量量突变，形状 (测量数, 故障相数)。
+        with_zff 为真时另返回故障点自阻抗矩阵 Z_ff（故障相数×故障相数，单位注入在各故障相时故障点各相的电压）。"""
         node_index, cur_off, n_meas = self.layout()
         y, nodes, fx = self.assemble(split=(sec, alpha))
         idx = {n: i for i, n in enumerate(nodes)}
@@ -272,6 +273,7 @@ class Network:
         rhs = np.zeros((len(nodes), c), dtype=complex)
         rhs[fx, np.arange(c)] = 1.0
         v = np.linalg.solve(y, rhs)
+        zff = v[fx]
         out = np.zeros((n_meas, c), dtype=complex)
         out[: len(self.nodes)] = v[[idx[n] for n in self.nodes]]
         for k, s in enumerate(self.sections):
@@ -285,11 +287,25 @@ class Network:
                 vk = v[[idx[n] for n in n1 + n2]]
                 out[cur_off[k][0]: cur_off[k][0] + ck] = s["y"][:ck] @ vk
                 out[cur_off[k][1]: cur_off[k][1] + ck] = s["y"][ck:] @ vk
-        return out
+        return (out, zff) if with_zff else out
 
-    def response_library(self, alphas):
-        """各区段在 alphas 网格上的响应，返回列表，元素形状 (len(alphas), 测量数, 故障相数)。"""
-        return [np.array([self.response(k, a) for a in alphas]) for k in range(len(self.sections))]
+    def response_library(self, alphas, with_zff=False):
+        """各区段在 alphas 网格上的响应，返回列表，元素形状 (len(alphas), 测量数, 故障相数)。
+        with_zff 为真时返回 (响应库, Z_ff 库)，Z_ff 库元素形状 (len(alphas), 故障相数, 故障相数)。"""
+        res = [[self.response(k, a, with_zff) for a in alphas] for k in range(len(self.sections))]
+        if not with_zff:
+            return [np.array(r) for r in res]
+        return [np.array([x[0] for x in r]) for r in res], [np.array([x[1] for x in r]) for r in res]
+
+    def prefault_fault_voltage(self, sec, alphas):
+        """故障前（名义负荷）区段 sec 上 alphas 位置各相的电压，由两端母线电压线性插值，形状 (len(alphas), 故障相数)。"""
+        s = self.sections[sec]
+        c = len(s["phases"])
+        node_index = {n: i for i, n in enumerate(self.nodes)}
+        v1 = self.v_pre[[node_index[n] for n in s["nodes"][:c]]]
+        v2 = self.v_pre[[node_index[n] for n in s["nodes"][c:]]]
+        a = np.asarray(alphas)[:, None]
+        return (1 - a) * v1 + a * v2
 
     def sensor_rows(self, sensors):
         """sensors 为 (线路名, 端子 0/1) 列表；返回所选测点的测量行号（该端母线各相电压 + 该端线路电流）。"""

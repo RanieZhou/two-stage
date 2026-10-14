@@ -14,13 +14,20 @@
   fx_in.npz --seed 21 --rf 0.01 300 --mult 0.6 1.1；fx_load.npz --seed 22 --rf 0.01 300 --mult 1.25 1.5；
   fx_rf.npz --seed 23 --rf 300 1000 --mult 0.6 1.1；fx_zp.npz --seed 24 --line-z-scale 1.1；fx_zm.npz --seed 25 --line-z-scale 0.9
   （fx_zp、fx_zm 的 --rf 0.01 300 --mult 0.6 1.1）
-用法：python evaluate_pipeline.py --data data/generated --out results
-消融（测点只用电压）：python evaluate_pipeline.py --voltage-only --out results/voltage_only
-阶段一换成 GCN（先由 baseline_gcn.py --export-probs 导出区段概率）：
-  python evaluate_pipeline.py --stage1-probs data/generated/gcn_delta_probs.npz --out results/gcn_stage1
-  加 --ensemble 则取 MLP 与 GCN 概率的平均（--out results/ensemble_stage1）
-非线性精化（每个场景前 N 个样本，耗时长）：python evaluate_pipeline.py --refine 600 --out results/refine
-IEEE 123（数据文件名带 ieee123_ 前缀）：python evaluate_pipeline.py --case ieee123 --hidden 256 256 192 --steps 15000 --k 0 --out results/ieee123
+阻抗扩增训练集（只存测点行，--sensors）：train_z0.88/0.94/1.06/1.12.npz 各 20000 个，seed 211–214，--rf 0.01 300 --mult 0.6 1.1，
+  --line-z-scale 同文件名中的倍率。
+用法（IEEE 34，改进后方案；--classes 沿用改进前评测得到的等价类，使区段指标同口径）：
+  python evaluate_pipeline.py --train-extra train_z0.88.npz train_z0.94.npz train_z1.06.npz train_z1.12.npz \
+      --classes results/evaluation.json --limit-val 10000 --limit-test 5000 --out results/improved/ieee34
+  改进前的方案（results/evaluation.json）：--physics free，不加 --train-extra、--classes、--limit-*。
+消融（测点只用电压）：加 --voltage-only
+阶段一换成 GCN（先由 baseline_gcn.py --export-probs 导出区段概率）：加 --stage1-probs data/generated/gcn_delta_probs.npz；
+  加 --ensemble 则取 MLP 与 GCN 概率的平均
+非线性精化（每个场景前 N 个样本，耗时长）：加 --refine 600
+IEEE 123（数据文件名带 ieee123_ 前缀，数据生成命令见 实验结果与分析.md 第十三节）：
+  python evaluate_pipeline.py --case ieee123 --hidden 256 256 192 --steps 15000 --k 2 --z-scales 0.9 1.0 1.1 \
+      --train-extra ieee123_train_z0.88.npz ieee123_train_z0.94.npz ieee123_train_z1.06.npz ieee123_train_z1.12.npz \
+      --classes results/ieee123/evaluation.json --out results/improved/ieee123
 """
 import argparse
 import json
@@ -39,7 +46,7 @@ from stage1_classifier import features, logits_of, probabilities, train
 from scipy.optimize import minimize_scalar
 from scipy.special import logsumexp
 
-from stage2_continuous_fse import ALPHAS, PhysicsModel
+from stage2_continuous_fse import ALPHAS, ConstrainedPhysicsModel, PhysicsModel
 from stage2_nonlinear_refine import RF_GATE, refine_batch
 
 EPS_REL = 0.02       # 线性化模型误差：相对本量测幅值的部分
@@ -50,9 +57,10 @@ Z_PRIOR_SIGMA = 0.05
 Z_PRIOR_WEIGHT = 1.0  # 在 ±5% 阻抗偏差验证集上网格搜索得到
 
 
-def phys_tag(sensors):
+def phys_tag(sensors, z_scales=Z_SCALES, constrained=False, amp_sigma=None):
     """物理残差缓存的文件名后缀：模型参数与测点。"""
-    return f"r{EPS_REL}_a{EPS_ABS}_z{'-'.join(map(str, Z_SCALES))}_w{Z_PRIOR_WEIGHT}_" + "".join(f"{n}{t}" for n, t in sensors)
+    return (f"r{EPS_REL}_a{EPS_ABS}_z{'-'.join(map(str, z_scales))}_w{Z_PRIOR_WEIGHT}_" + "".join(f"{n}{t}" for n, t in sensors)
+            + ("_con" + (f"g{amp_sigma}" if amp_sigma else "") if constrained else ""))
 
 
 
@@ -76,15 +84,15 @@ SCENARIOS = {
 L1_PREFIX = "固定档位"
 
 
-def load_set(path, net, rows, sigma, seed, noise_scale=1.0):
+def load_set(path, net, rows, sigma, seed, noise_scale=1.0, limit=0):
+    """limit 大于 0 时只取前 limit 个样本（噪声按完整数据集生成后截取，与不截取时的前 limit 个一致）。"""
     d = read_sensor_data(path, rows)
     zc = d["zc"]
-    rng = np.random.default_rng(seed)
-    return dict(
-        zc=zc, z=add_measurement_noise(rng, zc, sigma, noise_scale),
-        sec=d["sec"], alpha=d["alpha"], rf=d["rf"],
-        d_true=np.array([net.fault_distance_km(s, a) for s, a in zip(d["sec"], d["alpha"])]),
-    )
+    z = add_measurement_noise(np.random.default_rng(seed), zc, sigma, noise_scale)
+    cut = slice(None, limit or None)
+    sec, alpha = d["sec"][cut], d["alpha"][cut]
+    return dict(zc=zc[cut], z=z[cut], sec=sec, alpha=alpha, rf=d["rf"][cut],
+                d_true=np.array([net.fault_distance_km(s, a) for s, a in zip(sec, alpha)]))
 
 
 _pm = None
@@ -224,6 +232,14 @@ def main():
     ap.add_argument("--refine", type=int, default=0, help="每个场景取前 N 个样本做非线性精化评测（耗时），0 为不做")
     ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34", help="算例；ieee123 的数据文件名带 ieee123_ 前缀，不运行 L1")
     ap.add_argument("--k", type=int, default=2, help="阶段一候选区段数；0 为在验证集上从 2、3、5 中选联合决策区段准确率最高者")
+    ap.add_argument("--physics", choices=["free", "constrained"], default="constrained",
+                    help="阶段二物理模型：free 为自由复电流最小二乘，constrained 为过渡电阻取实数的约束模型")
+    ap.add_argument("--amp-sigma", type=float, default=0.05, help="约束模型中故障电流实增益的先验标准差，0 为不放开增益")
+    ap.add_argument("--z-scales", type=float, nargs="+", default=list(Z_SCALES), help="线路阻抗假设")
+    ap.add_argument("--classes", type=Path, help="沿用已有评测结果 json 中的等价类（不重新由物理证据定义，使不同物理模型的区段指标同口径）")
+    ap.add_argument("--limit-val", type=int, default=0, help="验证集只取前 N 个样本")
+    ap.add_argument("--limit-test", type=int, default=0, help="各测试场景只取前 N 个样本")
+    ap.add_argument("--train-extra", nargs="+", default=[], help="并入阶段一训练集的其他数据集文件名（如不同线路阻抗倍率下的 ieee123_train_z0.88.npz）")
     ap.add_argument("--hidden", type=int, nargs=3, default=None, help="阶段一 MLP 隐层宽度，默认 160 160 96")
     ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），不运行 L1")
     a = ap.parse_args()
@@ -233,7 +249,8 @@ def main():
     fp = (lambda name: a.data / name) if a.case == "ieee34" else (lambda name: a.data / f"{a.case}_{name}")   # 数据与缓存文件路径
     net = Network(case=case)
     rows = net.sensor_rows(case["sensors"])
-    tag = phys_tag(case["sensors"])
+    z_scales = tuple(a.z_scales)
+    tag = phys_tag(case["sensors"], z_scales, a.physics == "constrained", a.amp_sigma)
     if a.voltage_only:
         rows = rows[rows < len(net.nodes)]
         tag += "_V"
@@ -246,13 +263,22 @@ def main():
         print("L1 自身布点母线", own_buses, flush=True)
     sigma = net.measurement_sigma(rows)
     isv = rows < len(net.nodes)
-    libs = [Network(line_z_scale=z, case=case).response_library(ALPHAS) for z in Z_SCALES]
-    prior_pen = [Z_PRIOR_WEIGHT * ((z - 1) / Z_PRIOR_SIGMA) ** 2 for z in Z_SCALES]
-    pm = PhysicsModel(net, libs, prior_pen, rows, sigma, EPS_REL, EPS_ABS)
+    prior_pen = [Z_PRIOR_WEIGHT * ((z - 1) / Z_PRIOR_SIGMA) ** 2 for z in z_scales]
+    if a.physics == "constrained":
+        libs, zffs = zip(*[Network(line_z_scale=z, case=case).response_library(ALPHAS, with_zff=True) for z in z_scales])
+        pm = ConstrainedPhysicsModel(net, libs, zffs, prior_pen, rows, sigma, EPS_REL, EPS_ABS, amp_sigma=a.amp_sigma or None)
+    else:
+        libs = [Network(line_z_scale=z, case=case).response_library(ALPHAS) for z in z_scales]
+        pm = PhysicsModel(net, libs, prior_pen, rows, sigma, EPS_REL, EPS_ABS)
     n_sec = len(net.sections)
 
     # ---- 阶段一训练：每个批次重新叠加噪声 ----
     tr = read_sensor_data(fp("train.npz"), rows)
+    for name in a.train_extra:
+        extra = read_sensor_data(a.data / name, rows)
+        if extra["zc"].shape[1] != len(rows):   # 只存测点行的数据集按算例的完整测点列保存，仅电压时取其中的电压列
+            extra["zc"] = extra["zc"][:, net.sensor_rows(case["sensors"]) < len(net.nodes)]
+        tr = {k: np.concatenate([tr[k], extra[k]]) for k in ("sec", "zc")}
     zc_tr = tr["zc"]
     rng = np.random.default_rng(0)
 
@@ -265,17 +291,22 @@ def main():
     print(f"stage1 trained in {time.time() - t0:.0f}s", flush=True)
 
     # ---- 等价类 ----
-    val = load_set(fp("val.npz"), net, rows, sigma, seed=101)
+    lv = f"_L{a.limit_val}" if a.limit_val else ""
+    lt = f"_L{a.limit_test}" if a.limit_test else ""
+    val = load_set(fp("val.npz"), net, rows, sigma, seed=101, limit=a.limit_val)
     lg_val = logits_of(model, features(val["z"], sigma))
-    ana = load_set(fp("analysis.npz"), net, rows, sigma, seed=303)
-    pen_a = physics_cached(pm, ana["z"], fp(f"phys_analysis_{tag}.npz"))[0]
-    cls = equivalence_classes(pen_a, ana["sec"])
+    if a.classes:
+        cls = np.array(json.loads(a.classes.read_text())["equivalence_classes"])
+    else:
+        ana = load_set(fp("analysis.npz"), net, rows, sigma, seed=303)
+        pen_a = physics_cached(pm, ana["z"], fp(f"phys_analysis_{tag}.npz"))[0]
+        cls = equivalence_classes(pen_a, ana["sec"])
     print("等价类数", cls.max() + 1, [list(np.where(cls == c)[0]) for c in range(cls.max() + 1) if (cls == c).sum() > 1], flush=True)
 
     # ---- 阶段三标定：名义验证集 ----
     ext = np.load(a.stage1_probs) if a.stage1_probs else None
-    p_val = probabilities(lg_val) if ext is None else (ext["val"] + probabilities(lg_val)) / 2 if a.ensemble else ext["val"]
-    pen_v, j_v, al_v, ft_v = physics_cached(pm, val["z"], fp(f"phys_val_n1.0_{tag}.npz"))
+    p_val = probabilities(lg_val) if ext is None else (ext["val"][:len(lg_val)] + probabilities(lg_val)) / 2 if a.ensemble else ext["val"][:len(lg_val)]
+    pen_v, j_v, al_v, ft_v = physics_cached(pm, val["z"], fp(f"phys_val_n1.0_{tag}{lv}.npz"))
     j_true = j_v[np.arange(len(val["sec"])), val["sec"]]
     th = Thresholds(lam=fit_lambda(p_val, pen_v, cls, val["sec"]), j_threshold=float(np.quantile(j_true, 0.99)))
     print("阶段三参数", th, flush=True)
@@ -285,8 +316,11 @@ def main():
         val_acc = {kk: (cls[decide(p_val, pen_v, j_v, al_v, ft_v, cls, th, k=kk)["sec"]] == cls[val["sec"]]).mean() for kk in (2, 3, 5)}
         k = max(val_acc, key=val_acc.get)
         print("验证集联合决策区段准确率", val_acc, "取 k =", k, flush=True)
-    results = {"thresholds": th.__dict__, "equivalence_classes": cls.tolist(), "k": k}
+    results = {"thresholds": th.__dict__, "equivalence_classes": cls.tolist(), "k": k,
+               "config": dict(case=a.case, physics=a.physics, amp_sigma=a.amp_sigma, z_scales=list(z_scales), train_extra=a.train_extra,
+                              classes=str(a.classes) if a.classes else None, limit_val=a.limit_val, limit_test=a.limit_test)}
     stage = "mlp" if ext is None else "ens" if a.ensemble else "gcn"
+    stage += "_con" if a.physics == "constrained" else ""   # 非线性精化缓存的区分
     if a.refine:  # 非线性残差的权重 λ_nl：在带故障前相量的验证集（val_gcn）前 N 个样本上标定
         vg = np.load(a.data / "val_gcn.npz")
         n = a.refine
@@ -305,11 +339,12 @@ def main():
     for name, (fn, noise_scale) in SCENARIOS.items():
         if not fp(fn).exists():
             continue
-        ds = load_set(fp(fn), net, rows, sigma, seed=202, noise_scale=noise_scale)
+        ds = load_set(fp(fn), net, rows, sigma, seed=202, noise_scale=noise_scale, limit=a.limit_test)
         p = probabilities(logits_of(model, features(ds["z"], sigma)))
         if ext is not None:
-            p = (ext[name] + p) / 2 if a.ensemble else ext[name]
-        pen, j, al, ft = physics_cached(pm, ds["z"], fp(f"phys_{fn[:-4]}_n{noise_scale}_{tag}.npz"))
+            q = ext[name][:len(p)]
+            p = (q + p) / 2 if a.ensemble else q
+        pen, j, al, ft = physics_cached(pm, ds["z"], fp(f"phys_{fn[:-4]}_n{noise_scale}_{tag}{lt}.npz"))
         order = np.argsort(-p, axis=1)
         top1 = order[:, 0]
         idx = np.arange(len(p))

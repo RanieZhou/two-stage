@@ -212,6 +212,7 @@ def main():
     ap.add_argument("--modes", nargs="+", default=["gcn", "gcn_delta"])
     ap.add_argument("--val-only", action="store_true", help="只在验证集上评估，用于选择超参数")
     ap.add_argument("--export-probs", type=Path, help="gcn_delta 模式：导出验证集（val、val_gcn）与各场景（与评测脚本相同的带噪观测）上的区段概率")
+    ap.add_argument("--train-extra", nargs="+", default=[], help="并入训练集的其他数据集文件名（不同线路阻抗倍率下的数据，需含故障前相量）")
     ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34")
     ap.add_argument("--prepare", nargs=2, type=Path, metavar=("SRC", "DST"), help="从含 v0、i0 的数据集提取测点量测行")
     a = ap.parse_args()
@@ -227,6 +228,9 @@ def main():
     buses, lap = bus_graph(net, a.kn)
     print(f"图：{len(buses)} 个母线，Kn={a.kn}", flush=True)
     train = load_raw(fp("train_gcn.npz" if a.case == "ieee34" else "train.npz"), rows)
+    for name in a.train_extra:
+        extra = load_raw(a.data / name, rows)
+        train = {k: np.concatenate([train[k], extra[k]]) for k in train}
     eval_json = Path("results/evaluation.json") if a.case == "ieee34" else Path(f"results/{a.case}/evaluation.json")
     n_sec = len(net.sections)
 
