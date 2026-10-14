@@ -15,6 +15,7 @@
   fx_rf.npz --seed 23 --rf 300 1000 --mult 0.6 1.1；fx_zp.npz --seed 24 --line-z-scale 1.1；fx_zm.npz --seed 25 --line-z-scale 0.9
   （fx_zp、fx_zm 的 --rf 0.01 300 --mult 0.6 1.1）
 用法：python evaluate_pipeline.py --data data/generated --out results
+消融（测点只用电压）：python evaluate_pipeline.py --voltage-only --out results/voltage_only
 """
 import argparse
 import json
@@ -123,17 +124,23 @@ def main():
     ap.add_argument("--data", type=Path, default=Path("data/generated"))
     ap.add_argument("--out", type=Path, default=Path("results"))
     ap.add_argument("--steps", type=int, default=6000)
+    ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），只评测常规场景，不运行 L1")
     a = ap.parse_args()
     a.out.mkdir(exist_ok=True)
 
     net = Network()
     rows = net.sensor_rows(SENSORS)
-    # L1 两种测点：与本方案相同的 5 个测点母线；L1 按自身布点目标（前 k 命中率）选取的 5 个母线
-    l1_same = L1Locator(net, [net.nodes[r] for r in rows if r < len(net.nodes)])
-    with np.load(a.data / "analysis.npz") as f:
-        own_nodes, own_buses = greedy_pmu_placement(net, f["dv"][:3000].astype(complex), f["sec"][:3000])
-    l1_own = L1Locator(net, own_nodes)
-    print("L1 自身布点母线", own_buses, flush=True)
+    tag = TAG
+    if a.voltage_only:
+        rows = rows[rows < len(net.nodes)]
+        tag += "_V"
+    else:
+        # L1 两种测点：与本方案相同的 5 个测点母线；L1 按自身布点目标（前 k 命中率）选取的 5 个母线
+        l1_same = L1Locator(net, [net.nodes[r] for r in rows if r < len(net.nodes)])
+        with np.load(a.data / "analysis.npz") as f:
+            own_nodes, own_buses = greedy_pmu_placement(net, f["dv"][:3000].astype(complex), f["sec"][:3000])
+        l1_own = L1Locator(net, own_nodes)
+        print("L1 自身布点母线", own_buses, flush=True)
     sigma = net.measurement_sigma(rows)
     isv = rows < len(net.nodes)
     libs = [Network(line_z_scale=z).response_library(ALPHAS) for z in Z_SCALES]
@@ -158,25 +165,25 @@ def main():
     val = load_set(a.data / "val.npz", net, rows, sigma, seed=101)
     lg_val = logits_of(model, features(val["z"], sigma))
     ana = load_set(a.data / "analysis.npz", net, rows, sigma, seed=303)
-    pen_a = physics_cached(pm, ana["z"], a.data / f"phys_analysis_{TAG}.npz")[0]
+    pen_a = physics_cached(pm, ana["z"], a.data / f"phys_analysis_{tag}.npz")[0]
     cls = equivalence_classes(pen_a, ana["sec"])
     print("等价类数", cls.max() + 1, [list(np.where(cls == c)[0]) for c in range(cls.max() + 1) if (cls == c).sum() > 1], flush=True)
 
     # ---- 阶段三标定：名义验证集 ----
     p_val = probabilities(lg_val)
-    pen_v, j_v, al_v, ft_v = physics_cached(pm, val["z"], a.data / f"phys_val_n1.0_{TAG}.npz")
+    pen_v, j_v, al_v, ft_v = physics_cached(pm, val["z"], a.data / f"phys_val_n1.0_{tag}.npz")
     j_true = j_v[np.arange(len(val["sec"])), val["sec"]]
     th = Thresholds(lam=fit_lambda(p_val, pen_v, cls, val["sec"]), j_threshold=float(np.quantile(j_true, 0.99)))
     print("阶段三参数", th, flush=True)
 
     results = {"thresholds": th.__dict__, "equivalence_classes": cls.tolist()}
     for name, (fn, noise_scale) in SCENARIOS.items():
-        if not (a.data / fn).exists():
+        if not (a.data / fn).exists() or (a.voltage_only and name.startswith(L1_PREFIX)):
             continue
         ds = load_set(a.data / fn, net, rows, sigma, seed=202, noise_scale=noise_scale)
         lg = logits_of(model, features(ds["z"], sigma))
         p = probabilities(lg)
-        pen, j, al, ft = physics_cached(pm, ds["z"], a.data / f"phys_{fn[:-4]}_n{noise_scale}_{TAG}.npz")
+        pen, j, al, ft = physics_cached(pm, ds["z"], a.data / f"phys_{fn[:-4]}_n{noise_scale}_{tag}.npz")
         order = np.argsort(-p, axis=1)
         top1 = order[:, 0]
         idx = np.arange(len(p))

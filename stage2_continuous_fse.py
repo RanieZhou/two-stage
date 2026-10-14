@@ -51,7 +51,10 @@ class PhysicsModel:
         """z: (N, m) 复数量测。返回 (J_pen, J, alpha, ftype)，均为长度 N 的数组。"""
         n = len(z)
         az = np.abs(z)
-        zmax = np.where(self.is_v[None, :], az[:, self.is_v].max(1)[:, None], az[:, ~self.is_v].max(1)[:, None])
+        zmax = np.zeros_like(az)
+        for kind in (self.is_v, ~self.is_v):
+            if kind.any():
+                zmax[:, kind] = az[:, kind].max(1)[:, None]
         w2 = 1.0 / (self.sigma2[None, :] + self.eps_rel2 * az ** 2 + self.eps_abs2 * zmax ** 2)
         best_pen = np.full(n, np.inf)
         best = [np.zeros(n), np.zeros(n), np.zeros(n, dtype=int)]
