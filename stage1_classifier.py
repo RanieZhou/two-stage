@@ -31,6 +31,7 @@ def build_model(n_in, n_classes):
 def train(make_batch, n_in, n_classes, steps=6000, batch=512, lr=2e-3, seed=0):
     """make_batch(batch) 返回 (特征 float32, 标签 int64)，每次重新叠加噪声。"""
     torch.manual_seed(seed)
+    torch.set_num_threads(1)  # 单线程使训练结果可复现（多线程归约顺序不固定）
     model = build_model(n_in, n_classes)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps)

@@ -9,23 +9,31 @@ from pathlib import Path
 import numpy as np
 import opendssdirect as dss
 
-DSS_FILE = Path(__file__).parent / "data/ieee34/ieee34Mod1.dss"
-# 调压器旁 3 m 长的连接线，不作为故障区段
-NON_SECTION_LINES = ("l7", "l25")
+# 算例定义：dss 文件；非故障区段线路（调压器旁 3 m 连接线等）；根母线；固定电压的参考母线；不参与故障采样与候选的线路
+IEEE34 = dict(
+    dss=Path(__file__).parent / "data/ieee34/ieee34Mod1.dss",
+    non_section=("l7", "l25"), root="800", slack=("sourcebus", "800"), no_fault=(),
+)
 FT_PER_KM = 3280.84
 # 量测噪声：电压相量按名义电压的比例，电流相量为绝对值（A）；突变量为两次量测之差，标准差再乘 √2
 NOISE_V_REL = 1e-3
 NOISE_I_ABS = 0.2
+# 复现 L1 论文用的 IEEE 33 节点系统（Baran & Wu），线路 1-2 为根母线出线，不发生故障
+IEEE33 = dict(
+    dss=Path(__file__).parent / "data/ieee33/ieee33.dss",
+    non_section=(), root="1", slack=("1",), no_fault=("l1",),
+)
+CASES = {"ieee34": IEEE34, "ieee33": IEEE33}
 # 5 个测点：(线路名, 端子)，端子 0 为 bus1 端、1 为 bus2 端；每个测点量测该端母线各相电压与该端线路电流。
 # 选点依据：以物理穷举定位的平均测距误差为目标做贪心前向选择，5 个测点位于互不相同的母线。
 SENSORS = [("l6", 1), ("l30", 1), ("l2", 0), ("l11", 1), ("l29", 1)]
 
 
-def load_circuit(load_mult=1.0, fix_taps=True):
+def load_circuit(load_mult=1.0, fix_taps=True, case=IEEE34):
     """编译算例、设置负荷倍率并求解，随后冻结调压器档位。"""
     cwd = os.getcwd()
     dss.Command("Clear")
-    dss.Command(f"Compile {DSS_FILE}")
+    dss.Command(f"Compile {case['dss']}")
     os.chdir(cwd)  # OpenDSS 编译会切换工作目录
     dss.Command(f"Set LoadMult={load_mult}")
     dss.Command("Solve")
@@ -52,11 +60,11 @@ def _yprim():
     return (y[0::2] + 1j * y[1::2]).reshape(n, n)
 
 
-def read_sections():
+def read_sections(case=IEEE34):
     """读取全部故障区段（线路）的拓扑、相别、长度与全线 Yprim。"""
     sections = []
     for name in dss.Lines.AllNames():
-        if name in NON_SECTION_LINES:
+        if name in case["non_section"]:
             continue
         dss.Lines.Name(name)
         nodes = _terminal_nodes(dss.CktElement.BusNames(), dss.CktElement.NodeOrder())
@@ -76,13 +84,13 @@ def _length_km(length, units):
     return length * 1000.0 / FT_PER_KM
 
 
-def read_fixed_elements():
+def read_fixed_elements(case=IEEE34):
     """读取固定元件（电源内阻抗、变压器、电容器、调压器旁连接线）的 Yprim，故障区段线路由 read_sections 负责。"""
     elems = []
     for cls in ("Vsource", "Transformer", "Capacitor", "Line"):
         dss.Circuit.SetActiveClass(cls)
         for name in dss.ActiveClass.AllNames():
-            if cls == "Line" and name not in NON_SECTION_LINES:
+            if cls == "Line" and name not in case["non_section"]:
                 continue
             dss.Circuit.SetActiveElement(f"{cls}.{name}")
             nodes = _terminal_nodes(dss.CktElement.BusNames(), dss.CktElement.NodeOrder())
@@ -151,14 +159,15 @@ def line_segment_yprim(y_full, frac):
 class Network:
     """由故障前工作点构成的线性网络：区段、节点集合与除故障线外的固定导纳。"""
 
-    def __init__(self, load_mult=1.0, line_z_scale=1.0):
-        load_circuit(load_mult)
-        self.sections = read_sections()
+    def __init__(self, load_mult=1.0, line_z_scale=1.0, case=IEEE34):
+        self.case = case
+        load_circuit(load_mult, case=case)
+        self.sections = read_sections(case)
         for s in self.sections:
             s["y"] = scale_line_yprim(s["y"], line_z_scale)
         self.section_index = {s["name"]: i for i, s in enumerate(self.sections)}
         self.nodes = [n.lower() for n in dss.Circuit.AllNodeNames()]
-        self._elements = read_fixed_elements()
+        self._elements = read_fixed_elements(case)
         self._loads = read_load_admittances()
         self.distance_km = self._bus_distances()
         slot = {n.lower(): k for k, n in enumerate(dss.Circuit.AllNodeNames())}
@@ -175,15 +184,15 @@ class Network:
             adj.setdefault(s["bus2"], []).append((s["bus1"], s["length_km"]))
         # 变压器、调压器与调压器旁连接线视为零长度
         links = [f"Transformer.{n}" for n in dss.Transformers.AllNames()]
-        links += [f"Line.{n}" for n in NON_SECTION_LINES]
+        links += [f"Line.{n}" for n in self.case["non_section"]]
         for el in links:
             dss.Circuit.SetActiveElement(el)
             b = [x.split(".")[0].lower() for x in dss.CktElement.BusNames()]
             adj.setdefault(b[0], []).append((b[1], 0.0))
             adj.setdefault(b[1], []).append((b[0], 0.0))
         self.adj = adj
-        dist = {"800": 0.0}
-        stack = ["800"]
+        dist = {self.case["root"]: 0.0}
+        stack = [self.case["root"]]
         while stack:
             u = stack.pop()
             for v, d in adj.get(u, []):

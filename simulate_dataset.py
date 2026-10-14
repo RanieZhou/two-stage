@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import opendssdirect as dss
 
-from ieee34_bus_impedance import Network, _complex, load_circuit
+from ieee34_bus_impedance import CASES, IEEE34, Network, _complex, load_circuit
 
 # (类型名, 故障相)，相别为 1/2/3
 FAULT_TYPES = [
@@ -72,10 +72,10 @@ class Simulator:
     fixed_taps 为真时调压器档位固定在名义负荷下的位置，不随各样本的负荷倍率重新调节。
     """
 
-    def __init__(self, line_z_scale=1.0, fixed_taps=False):
+    def __init__(self, line_z_scale=1.0, fixed_taps=False, case=IEEE34):
         self.fixed_taps = fixed_taps
-        self.net = Network()
-        load_circuit()
+        self.net = Network(case=case)
+        load_circuit(case=case)
         self.base_len = split_lines(self.net)
         if line_z_scale != 1.0:
             scale_line_impedance(line_z_scale)
@@ -121,16 +121,16 @@ class Simulator:
         return v1 - v0, i1 - i0, i_f, v0, i0
 
 
-def sample_records(rng, sections, n, rf_range, mult_range, by_length=True):
-    """by_length 为真时故障位置沿全网均匀（区段按长度加权），否则各区段等概率；区段内 α 在 [0.02, 0.98] 均匀，过渡电阻对数均匀。"""
-    length = np.array([s["length_km"] if by_length else 1.0 for s in sections])
+def sample_records(rng, sections, n, rf_range, mult_range, by_length=True, no_fault=(), rf_uniform=False, alpha_range=(0.02, 0.98)):
+    """by_length 为真时故障位置沿全网均匀（区段按长度加权），否则各区段等概率；区段内 α 在 alpha_range 内均匀；过渡电阻默认对数均匀，rf_uniform 为真时线性均匀。"""
+    length = np.array([0.0 if s["name"] in no_fault else (s["length_km"] if by_length else 1.0) for s in sections])
     secs = rng.choice(len(sections), n, p=length / length.sum())
     recs = []
     for s in secs:
         types = valid_types(sections[s]["phases"])
         recs.append((
-            int(s), rng.uniform(0.02, 0.98), int(rng.choice(types)),
-            float(np.exp(rng.uniform(np.log(rf_range[0]), np.log(rf_range[1])))),
+            int(s), rng.uniform(*alpha_range), int(rng.choice(types)),
+            float(rng.uniform(*rf_range)) if rf_uniform else float(np.exp(rng.uniform(np.log(rf_range[0]), np.log(rf_range[1])))),
             rng.uniform(*mult_range),
         ))
     return recs
@@ -139,25 +139,28 @@ def sample_records(rng, sections, n, rf_range, mult_range, by_length=True):
 _sim = None
 _line_z_scale = 1.0
 _fixed_taps = False
+_case = IEEE34
 
 
 def _work(recs):
     global _sim
     if _sim is None:
-        _sim = Simulator(_line_z_scale, _fixed_taps)
+        _sim = Simulator(_line_z_scale, _fixed_taps, _case)
     out = []
     for r in recs:
         out.append(_sim.run(*r))
     return out
 
 
-def generate(n, seed, rf_range, mult_range, workers, by_length=True, line_z_scale=1.0, fixed_taps=False):
-    global _line_z_scale, _fixed_taps
+def generate(n, seed, rf_range, mult_range, workers, by_length=True, line_z_scale=1.0, fixed_taps=False, case=IEEE34,
+             rf_uniform=False, alpha_range=(0.02, 0.98)):
+    global _line_z_scale, _fixed_taps, _case
+    _case = case
     _line_z_scale = line_z_scale
     _fixed_taps = fixed_taps
-    net_sections = Network().sections
+    net_sections = Network(case=case).sections
     rng = np.random.default_rng(seed)
-    recs = sample_records(rng, net_sections, n, rf_range, mult_range, by_length)
+    recs = sample_records(rng, net_sections, n, rf_range, mult_range, by_length, case["no_fault"], rf_uniform, alpha_range)
     chunks = [recs[i:i + 64] for i in range(0, n, 64)]
     with Pool(workers) as pool:
         flat = [x for chunk in pool.map(_work, chunks) for x in chunk]
@@ -179,13 +182,16 @@ if __name__ == "__main__":
     ap.add_argument("--rf", type=float, nargs=2, default=(0.01, 1000.0))
     ap.add_argument("--mult", type=float, nargs=2, default=(0.6, 1.2))
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--rf-uniform", action="store_true", help="过渡电阻线性均匀（默认对数均匀）")
+    ap.add_argument("--alpha", type=float, nargs=2, default=(0.02, 0.98), help="区段内故障位置比例范围")
+    ap.add_argument("--case", choices=sorted(CASES), default="ieee34")
     ap.add_argument("--fixed-taps", action="store_true", help="调压器档位固定在名义负荷下的位置")
     ap.add_argument("--line-z-scale", type=float, default=1.0, help="仿真线路串联阻抗相对建模参数的倍数")
     ap.add_argument("--uniform-sections", action="store_true", help="各区段等概率而非按长度加权")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     a.out = a.out.resolve()  # OpenDSS 编译会切换工作目录
-    data = generate(a.n, a.seed, a.rf, a.mult, a.workers, not a.uniform_sections, a.line_z_scale, a.fixed_taps)
+    data = generate(a.n, a.seed, a.rf, a.mult, a.workers, not a.uniform_sections, a.line_z_scale, a.fixed_taps, CASES[a.case], a.rf_uniform, tuple(a.alpha))
     a.out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(a.out, **data)
     print(f"saved {a.n} samples -> {a.out}")

@@ -1,0 +1,106 @@
+! IEEE 33 节点配电系统（Baran & Wu, IEEE Trans. Power Del., 1989, 4(2): 1401-1407），数据取自 MATPOWER case33bw。
+! 三相线路各相阻抗相同、相间无耦合；每个母线负荷按原有功/无功接在单一相（相序循环），形成三相不平衡的恒阻抗负荷。
+Clear
+Set DefaultBaseFrequency=60
+New Circuit.ieee33 basekv=12.66 pu=1.0 phases=3 bus1=1 mvasc3=1e9 mvasc1=1e9
+
+New Linecode.lc1 nphases=3 units=kft rmatrix=[0.0922 | 0 0.0922 | 0 0 0.0922] xmatrix=[0.047 | 0 0.047 | 0 0 0.047] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L1 Phases=3 Bus1=1.1.2.3 Bus2=2.1.2.3 LineCode=lc1 Length=1 units=kft
+New Linecode.lc2 nphases=3 units=kft rmatrix=[0.493 | 0 0.493 | 0 0 0.493] xmatrix=[0.2511 | 0 0.2511 | 0 0 0.2511] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L2 Phases=3 Bus1=2.1.2.3 Bus2=3.1.2.3 LineCode=lc2 Length=1 units=kft
+New Linecode.lc3 nphases=3 units=kft rmatrix=[0.366 | 0 0.366 | 0 0 0.366] xmatrix=[0.1864 | 0 0.1864 | 0 0 0.1864] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L3 Phases=3 Bus1=3.1.2.3 Bus2=4.1.2.3 LineCode=lc3 Length=1 units=kft
+New Linecode.lc4 nphases=3 units=kft rmatrix=[0.3811 | 0 0.3811 | 0 0 0.3811] xmatrix=[0.1941 | 0 0.1941 | 0 0 0.1941] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L4 Phases=3 Bus1=4.1.2.3 Bus2=5.1.2.3 LineCode=lc4 Length=1 units=kft
+New Linecode.lc5 nphases=3 units=kft rmatrix=[0.819 | 0 0.819 | 0 0 0.819] xmatrix=[0.707 | 0 0.707 | 0 0 0.707] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L5 Phases=3 Bus1=5.1.2.3 Bus2=6.1.2.3 LineCode=lc5 Length=1 units=kft
+New Linecode.lc6 nphases=3 units=kft rmatrix=[0.1872 | 0 0.1872 | 0 0 0.1872] xmatrix=[0.6188 | 0 0.6188 | 0 0 0.6188] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L6 Phases=3 Bus1=6.1.2.3 Bus2=7.1.2.3 LineCode=lc6 Length=1 units=kft
+New Linecode.lc7 nphases=3 units=kft rmatrix=[0.7114 | 0 0.7114 | 0 0 0.7114] xmatrix=[0.2351 | 0 0.2351 | 0 0 0.2351] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L7 Phases=3 Bus1=7.1.2.3 Bus2=8.1.2.3 LineCode=lc7 Length=1 units=kft
+New Linecode.lc8 nphases=3 units=kft rmatrix=[1.03 | 0 1.03 | 0 0 1.03] xmatrix=[0.74 | 0 0.74 | 0 0 0.74] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L8 Phases=3 Bus1=8.1.2.3 Bus2=9.1.2.3 LineCode=lc8 Length=1 units=kft
+New Linecode.lc9 nphases=3 units=kft rmatrix=[1.044 | 0 1.044 | 0 0 1.044] xmatrix=[0.74 | 0 0.74 | 0 0 0.74] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L9 Phases=3 Bus1=9.1.2.3 Bus2=10.1.2.3 LineCode=lc9 Length=1 units=kft
+New Linecode.lc10 nphases=3 units=kft rmatrix=[0.1966 | 0 0.1966 | 0 0 0.1966] xmatrix=[0.065 | 0 0.065 | 0 0 0.065] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L10 Phases=3 Bus1=10.1.2.3 Bus2=11.1.2.3 LineCode=lc10 Length=1 units=kft
+New Linecode.lc11 nphases=3 units=kft rmatrix=[0.3744 | 0 0.3744 | 0 0 0.3744] xmatrix=[0.1238 | 0 0.1238 | 0 0 0.1238] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L11 Phases=3 Bus1=11.1.2.3 Bus2=12.1.2.3 LineCode=lc11 Length=1 units=kft
+New Linecode.lc12 nphases=3 units=kft rmatrix=[1.468 | 0 1.468 | 0 0 1.468] xmatrix=[1.155 | 0 1.155 | 0 0 1.155] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L12 Phases=3 Bus1=12.1.2.3 Bus2=13.1.2.3 LineCode=lc12 Length=1 units=kft
+New Linecode.lc13 nphases=3 units=kft rmatrix=[0.5416 | 0 0.5416 | 0 0 0.5416] xmatrix=[0.7129 | 0 0.7129 | 0 0 0.7129] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L13 Phases=3 Bus1=13.1.2.3 Bus2=14.1.2.3 LineCode=lc13 Length=1 units=kft
+New Linecode.lc14 nphases=3 units=kft rmatrix=[0.591 | 0 0.591 | 0 0 0.591] xmatrix=[0.526 | 0 0.526 | 0 0 0.526] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L14 Phases=3 Bus1=14.1.2.3 Bus2=15.1.2.3 LineCode=lc14 Length=1 units=kft
+New Linecode.lc15 nphases=3 units=kft rmatrix=[0.7463 | 0 0.7463 | 0 0 0.7463] xmatrix=[0.545 | 0 0.545 | 0 0 0.545] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L15 Phases=3 Bus1=15.1.2.3 Bus2=16.1.2.3 LineCode=lc15 Length=1 units=kft
+New Linecode.lc16 nphases=3 units=kft rmatrix=[1.289 | 0 1.289 | 0 0 1.289] xmatrix=[1.721 | 0 1.721 | 0 0 1.721] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L16 Phases=3 Bus1=16.1.2.3 Bus2=17.1.2.3 LineCode=lc16 Length=1 units=kft
+New Linecode.lc17 nphases=3 units=kft rmatrix=[0.732 | 0 0.732 | 0 0 0.732] xmatrix=[0.574 | 0 0.574 | 0 0 0.574] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L17 Phases=3 Bus1=17.1.2.3 Bus2=18.1.2.3 LineCode=lc17 Length=1 units=kft
+New Linecode.lc18 nphases=3 units=kft rmatrix=[0.164 | 0 0.164 | 0 0 0.164] xmatrix=[0.1565 | 0 0.1565 | 0 0 0.1565] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L18 Phases=3 Bus1=2.1.2.3 Bus2=19.1.2.3 LineCode=lc18 Length=1 units=kft
+New Linecode.lc19 nphases=3 units=kft rmatrix=[1.5042 | 0 1.5042 | 0 0 1.5042] xmatrix=[1.3554 | 0 1.3554 | 0 0 1.3554] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L19 Phases=3 Bus1=19.1.2.3 Bus2=20.1.2.3 LineCode=lc19 Length=1 units=kft
+New Linecode.lc20 nphases=3 units=kft rmatrix=[0.4095 | 0 0.4095 | 0 0 0.4095] xmatrix=[0.4784 | 0 0.4784 | 0 0 0.4784] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L20 Phases=3 Bus1=20.1.2.3 Bus2=21.1.2.3 LineCode=lc20 Length=1 units=kft
+New Linecode.lc21 nphases=3 units=kft rmatrix=[0.7089 | 0 0.7089 | 0 0 0.7089] xmatrix=[0.9373 | 0 0.9373 | 0 0 0.9373] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L21 Phases=3 Bus1=21.1.2.3 Bus2=22.1.2.3 LineCode=lc21 Length=1 units=kft
+New Linecode.lc22 nphases=3 units=kft rmatrix=[0.4512 | 0 0.4512 | 0 0 0.4512] xmatrix=[0.3083 | 0 0.3083 | 0 0 0.3083] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L22 Phases=3 Bus1=3.1.2.3 Bus2=23.1.2.3 LineCode=lc22 Length=1 units=kft
+New Linecode.lc23 nphases=3 units=kft rmatrix=[0.898 | 0 0.898 | 0 0 0.898] xmatrix=[0.7091 | 0 0.7091 | 0 0 0.7091] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L23 Phases=3 Bus1=23.1.2.3 Bus2=24.1.2.3 LineCode=lc23 Length=1 units=kft
+New Linecode.lc24 nphases=3 units=kft rmatrix=[0.896 | 0 0.896 | 0 0 0.896] xmatrix=[0.7011 | 0 0.7011 | 0 0 0.7011] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L24 Phases=3 Bus1=24.1.2.3 Bus2=25.1.2.3 LineCode=lc24 Length=1 units=kft
+New Linecode.lc25 nphases=3 units=kft rmatrix=[0.203 | 0 0.203 | 0 0 0.203] xmatrix=[0.1034 | 0 0.1034 | 0 0 0.1034] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L25 Phases=3 Bus1=6.1.2.3 Bus2=26.1.2.3 LineCode=lc25 Length=1 units=kft
+New Linecode.lc26 nphases=3 units=kft rmatrix=[0.2842 | 0 0.2842 | 0 0 0.2842] xmatrix=[0.1447 | 0 0.1447 | 0 0 0.1447] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L26 Phases=3 Bus1=26.1.2.3 Bus2=27.1.2.3 LineCode=lc26 Length=1 units=kft
+New Linecode.lc27 nphases=3 units=kft rmatrix=[1.059 | 0 1.059 | 0 0 1.059] xmatrix=[0.9337 | 0 0.9337 | 0 0 0.9337] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L27 Phases=3 Bus1=27.1.2.3 Bus2=28.1.2.3 LineCode=lc27 Length=1 units=kft
+New Linecode.lc28 nphases=3 units=kft rmatrix=[0.8042 | 0 0.8042 | 0 0 0.8042] xmatrix=[0.7006 | 0 0.7006 | 0 0 0.7006] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L28 Phases=3 Bus1=28.1.2.3 Bus2=29.1.2.3 LineCode=lc28 Length=1 units=kft
+New Linecode.lc29 nphases=3 units=kft rmatrix=[0.5075 | 0 0.5075 | 0 0 0.5075] xmatrix=[0.2585 | 0 0.2585 | 0 0 0.2585] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L29 Phases=3 Bus1=29.1.2.3 Bus2=30.1.2.3 LineCode=lc29 Length=1 units=kft
+New Linecode.lc30 nphases=3 units=kft rmatrix=[0.9744 | 0 0.9744 | 0 0 0.9744] xmatrix=[0.963 | 0 0.963 | 0 0 0.963] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L30 Phases=3 Bus1=30.1.2.3 Bus2=31.1.2.3 LineCode=lc30 Length=1 units=kft
+New Linecode.lc31 nphases=3 units=kft rmatrix=[0.3105 | 0 0.3105 | 0 0 0.3105] xmatrix=[0.3619 | 0 0.3619 | 0 0 0.3619] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L31 Phases=3 Bus1=31.1.2.3 Bus2=32.1.2.3 LineCode=lc31 Length=1 units=kft
+New Linecode.lc32 nphases=3 units=kft rmatrix=[0.341 | 0 0.341 | 0 0 0.341] xmatrix=[0.5302 | 0 0.5302 | 0 0 0.5302] cmatrix=[0 | 0 0 | 0 0 0]
+New Line.L32 Phases=3 Bus1=32.1.2.3 Bus2=33.1.2.3 LineCode=lc32 Length=1 units=kft
+
+New Load.B2 Bus1=2.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=100.0 kvar=60.0 vminpu=0.1
+New Load.B3 Bus1=3.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=90.0 kvar=40.0 vminpu=0.1
+New Load.B4 Bus1=4.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=120.0 kvar=80.0 vminpu=0.1
+New Load.B5 Bus1=5.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=30.0 vminpu=0.1
+New Load.B6 Bus1=6.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=20.0 vminpu=0.1
+New Load.B7 Bus1=7.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=200.0 kvar=100.0 vminpu=0.1
+New Load.B8 Bus1=8.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=200.0 kvar=100.0 vminpu=0.1
+New Load.B9 Bus1=9.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=20.0 vminpu=0.1
+New Load.B10 Bus1=10.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=20.0 vminpu=0.1
+New Load.B11 Bus1=11.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=45.0 kvar=30.0 vminpu=0.1
+New Load.B12 Bus1=12.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=35.0 vminpu=0.1
+New Load.B13 Bus1=13.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=35.0 vminpu=0.1
+New Load.B14 Bus1=14.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=120.0 kvar=80.0 vminpu=0.1
+New Load.B15 Bus1=15.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=10.0 vminpu=0.1
+New Load.B16 Bus1=16.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=20.0 vminpu=0.1
+New Load.B17 Bus1=17.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=20.0 vminpu=0.1
+New Load.B18 Bus1=18.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=90.0 kvar=40.0 vminpu=0.1
+New Load.B19 Bus1=19.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=90.0 kvar=40.0 vminpu=0.1
+New Load.B20 Bus1=20.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=90.0 kvar=40.0 vminpu=0.1
+New Load.B21 Bus1=21.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=90.0 kvar=40.0 vminpu=0.1
+New Load.B22 Bus1=22.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=90.0 kvar=40.0 vminpu=0.1
+New Load.B23 Bus1=23.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=90.0 kvar=50.0 vminpu=0.1
+New Load.B24 Bus1=24.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=420.0 kvar=200.0 vminpu=0.1
+New Load.B25 Bus1=25.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=420.0 kvar=200.0 vminpu=0.1
+New Load.B26 Bus1=26.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=25.0 vminpu=0.1
+New Load.B27 Bus1=27.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=25.0 vminpu=0.1
+New Load.B28 Bus1=28.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=20.0 vminpu=0.1
+New Load.B29 Bus1=29.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=120.0 kvar=70.0 vminpu=0.1
+New Load.B30 Bus1=30.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=200.0 kvar=600.0 vminpu=0.1
+New Load.B31 Bus1=31.2 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=150.0 kvar=70.0 vminpu=0.1
+New Load.B32 Bus1=32.3 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=210.0 kvar=100.0 vminpu=0.1
+New Load.B33 Bus1=33.1 Phases=1 Conn=Wye Model=2 kV=7.3094 kW=60.0 kvar=40.0 vminpu=0.1
+
+Set VoltageBases=[12.66]
+CalcVoltageBases

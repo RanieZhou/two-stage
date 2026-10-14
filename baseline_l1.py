@@ -23,7 +23,6 @@ E_INJ = 0.20                             # 伪量测相对误差（论文取 5%�
 E_VMAG = 0.001                           # 末端母线电压幅值相对误差，按 e/3 为标准差
 VMIN = 0.85                              # 负荷电压低于此值（标幺）时按恒阻抗处理（OpenDSS vminpu）
 ZERO_INJ_SIGMA = 0.01                    # 无负荷母线的零注入伪量测标准差（A）
-EXCLUDED_LEAF = ("sourcebus", "800")
 
 
 def load_factor(model, x):
@@ -35,14 +34,22 @@ def load_factor(model, x):
     return np.where(x >= VMIN, 1.0, (x / VMIN) ** 2)
 
 
+def noisy_phasor(rng, x, mag_rel, ang_deg):
+    """论文的相量量测误差：幅值乘 (1 + mag_rel·randn)，相角加 ang_deg·randn（度）。"""
+    x = np.asarray(x, dtype=complex)
+    return np.abs(x) * (1 + mag_rel * rng.standard_normal(x.shape)) * np.exp(
+        1j * (np.angle(x) + np.deg2rad(ang_deg) * rng.standard_normal(x.shape)))
+
+
 class L1Locator:
-    def __init__(self, net: Network, pmu_nodes):
-        """pmu_nodes 为 μPMU 所在节点名列表（各母线的各相）。"""
+    def __init__(self, net: Network, pmu_nodes, build_se=True):
+        """pmu_nodes 为 μPMU 所在节点名列表（各母线的各相）；build_se 为假时只做阶段一，不构造状态估计变体。"""
         self.net = net
         self.nodes = net.nodes
         idx = {n: i for i, n in enumerate(self.nodes)}
         self.idx = idx
-        is_slack = np.array([n.startswith("sourcebus") or n.startswith("800.") for n in self.nodes])
+        self.slack_buses = set(net.case["slack"])
+        is_slack = np.array([n.split(".")[0] in self.slack_buses for n in self.nodes])
         self.slack = np.where(is_slack)[0]
         self.free = np.where(~is_slack)[0]
         self.pos_free = {int(n): k for k, n in enumerate(self.free)}   # 节点序号 -> 自由节点位置
@@ -63,7 +70,7 @@ class L1Locator:
         self.br_vn = np.sqrt(np.array([b["v2"] for b in br]))
         self.br_model = np.array([b["model"] for b in br])
         # 末端母线
-        leaf_buses = {b for b, v in net.adj.items() if len({x for x, _ in v}) == 1 and b not in EXCLUDED_LEAF}
+        leaf_buses = {b for b, v in net.adj.items() if len({x for x, _ in v}) == 1 and b not in self.slack_buses}
         self.leaf = np.array([i for i, n in enumerate(self.nodes) if n.split(".")[0] in leaf_buses])
         # 各母线节点
         self.bus_nodes = {}
@@ -71,11 +78,13 @@ class L1Locator:
             self.bus_nodes.setdefault(n.split(".")[0], []).append(i)
         self.phase_of = np.array([int(n.split(".")[1]) for n in self.nodes])
         # 状态估计变体：母线级（不拆线）与各线路各位置的虚拟母线
-        v_nom = net.v_pre
-        self.variants = {None: self._variant(None, v_nom)}
-        for k in range(len(net.sections)):
-            for a in ALPHA_GRID:
-                self.variants[(k, round(float(a), 3))] = self._variant((k, a), v_nom)
+        self.variants = {}
+        if build_se:
+            v_nom = net.v_pre
+            self.variants = {None: self._variant(None, v_nom)}
+            for k in range(len(net.sections)):
+                for a in ALPHA_GRID:
+                    self.variants[(k, round(float(a), 3))] = self._variant((k, a), v_nom)
 
     def _variant(self, split, v_nom):
         """构造一个网络变体的加权最小二乘伪逆。ECM 权重取名义工作点注入电流幅值的 e/3。"""
@@ -102,6 +111,9 @@ class L1Locator:
         for k, (a, ap) in enumerate(self.stage1_pinv):
             res = dv_pmu - (dv_pmu @ ap.T) @ a.T
             mi[:, k] = (np.abs(res) ** 2).sum(1)
+        for k, s in enumerate(self.net.sections):
+            if s["name"] in self.net.case["no_fault"]:
+                mi[:, k] = np.inf
         return mi
 
     # ---------- 阶段二 ----------
@@ -163,51 +175,70 @@ class L1Locator:
                 best = (js[i], k, float(a_hat))
         return best
 
-    def locate(self, sample, mi, literal=True):
-        """阶段二：由阶段一匹配指数 mi (区段数,) 与样本量测给出 (区段序号, α)。
-
-        literal=True 为论文流程：先在候选线路的端点母线上做状态估计选出最匹配母线，再细化其相邻线路；
-        literal=False 把分段细化直接用于全部候选线路（线路较长时端点母线近似不成立，细化更可靠）。
-        """
+    def best_bus(self, sample, mi):
+        """阶段二第一步：对阶段一候选线路的端点母线做状态估计匹配，返回匹配指数最小的母线。"""
         top = np.argsort(mi)[:TOP_K]
-        if not literal:
-            _, k, a = self._refine(top, sample)
-            return k, a
         buses = []
         for k in top:
             for b in (self.net.sections[k]["bus1"], self.net.sections[k]["bus2"]):
-                if b not in ("800", "sourcebus") and b not in buses:
+                if b not in self.slack_buses and b not in buses:
                     buses.append(b)
         var0 = self.variants[None]
         j_bus = {}
         for b in buses:
             cand = [(self.pos_free[i], int(self.phase_of[i])) for i in self.bus_nodes[b] if i in self.pos_free]
             j_bus[b] = self._solve(var0, cand, sample)
-        best_bus = min(j_bus, key=j_bus.get)
-        adjacent = [k for k, s in enumerate(self.net.sections) if best_bus in (s["bus1"], s["bus2"])]
+        return min(j_bus, key=j_bus.get)
+
+    def locate(self, sample, mi, literal=True):
+        """阶段二：由阶段一匹配指数 mi (区段数,) 与样本量测给出 (区段序号, α)。
+
+        literal=True 为论文流程：先在候选线路的端点母线上做状态估计选出最匹配母线，再细化其相邻线路；
+        literal=False 把分段细化直接用于全部候选线路（线路较长时端点母线近似不成立，细化更可靠）。
+        """
+        if not literal:
+            _, k, a = self._refine(np.argsort(mi)[:TOP_K], sample)
+            return k, a
+        best_bus = self.best_bus(sample, mi)
+        adjacent = [k for k, s in enumerate(self.net.sections)
+                    if best_bus in (s["bus1"], s["bus2"]) and s["name"] not in self.net.case["no_fault"]]
         _, k, a = self._refine(adjacent, sample)
         return k, a
 
-    def make_sample(self, rng, d, n, noise_scale=1.0):
-        """由数据集第 n 条样本构造 L1 所需量测：μPMU 与根母线相量带噪声，末端电压幅值与伪量测带噪声。"""
+    def make_sample(self, rng, d, n, noise_scale=1.0, paper=None):
+        """由数据集第 n 条样本构造 L1 所需量测。
+
+        默认：μPMU 与根母线相量带复高斯噪声（电压为名义电压的比例、电流为绝对值）。
+        paper 给定时按论文的幅值/相角误差：pmu、root_i 为 (幅值相对误差, 相角误差/度)，vmag 为末端电压幅值相对误差，
+        e_inj 为伪量测相对误差；幅值相对误差已含论文的 1/3 因子。
+        """
         net = self.net
         v_post = d["v0"][n].astype(complex) + d["dv"][n].astype(complex)
-        sig_v = noise_scale * NOISE_V_REL * np.abs(net.v_pre)
+        start = net.layout()[1][0][0] - len(net.nodes)   # 布局偏移含节点电压段，样本中的电流数组不含
+        i_root = (d["i0"][n].astype(complex) + d["di"][n].astype(complex))[start: start + 3]
+        e_inj, e_vmag = E_INJ, E_VMAG
+        if paper is None:
+            i_root = i_root + noise_scale * NOISE_I_ABS * (rng.standard_normal(3) + 1j * rng.standard_normal(3))
+        else:
+            e_inj, e_vmag = paper["e_inj"], paper["vmag"] * 3
+        s_pre = self.br_s * d["load_mult"][n] * (1 + e_inj / 3 * rng.standard_normal(len(self.br_s)))
+        if paper is None:
+            sig_v = noise_scale * NOISE_V_REL * np.abs(net.v_pre)
 
-        def noisy_v(i):
-            return v_post[i] + sig_v[i] * (rng.standard_normal(len(i)) + 1j * rng.standard_normal(len(i)))
+            def noisy_v(i):
+                return v_post[i] + sig_v[i] * (rng.standard_normal(len(i)) + 1j * rng.standard_normal(len(i)))
 
-        layout = net.layout()[1]
-        i_root = (d["i0"][n].astype(complex) + d["di"][n].astype(complex))[layout[0][0]: layout[0][0] + 3]
-        i_root = i_root + noise_scale * NOISE_I_ABS * (rng.standard_normal(3) + 1j * rng.standard_normal(3))
-        mult = d["load_mult"][n]
-        s_pre = self.br_s * mult * (1 + E_INJ / 3 * rng.standard_normal(len(self.br_s)))
+            v_pmu, v_slack = noisy_v(self.pmu_idx), noisy_v(self.slack)
+        else:
+            v_pmu = noisy_phasor(rng, v_post[self.pmu_idx], *paper["pmu"])
+            v_slack = noisy_phasor(rng, v_post[self.slack], *paper["pmu"])
+            i_root = noisy_phasor(rng, i_root, *paper["root_i"])
         v0 = d["v0"][n].astype(complex)
         vb0 = np.where(self.br_b >= 0, v0[np.maximum(self.br_b, 0)], 0.0)
         x_pre = np.abs(v0[self.br_a] - vb0) / self.br_vn
         return dict(
-            v_pmu=noisy_v(self.pmu_idx), v_slack=noisy_v(self.slack), i_root=i_root,
-            leaf_mag=np.abs(v_post[self.leaf]) * (1 + E_VMAG / 3 * rng.standard_normal(len(self.leaf))),
+            v_pmu=v_pmu, v_slack=v_slack, i_root=i_root,
+            leaf_mag=np.abs(v_post[self.leaf]) * (1 + e_vmag / 3 * rng.standard_normal(len(self.leaf))),
             s_pre=s_pre, x_pre=x_pre, v_init=v0.copy(),
         )
 
@@ -241,7 +272,8 @@ def greedy_pmu_placement(net, dv, sec_true, n_pmu=5, k=TOP_K, seed=0):
     """
     rng = np.random.default_rng(seed)
     nodes = net.nodes
-    free = [i for i, n in enumerate(nodes) if not (n.startswith("sourcebus") or n.startswith("800."))]
+    slack = set(net.case["slack"])
+    free = [i for i, n in enumerate(nodes) if n.split(".")[0] not in slack]
     pos = {i: p for p, i in enumerate(free)}
     y, _, _ = net.assemble()
     z = np.linalg.inv(y[np.ix_(free, free)])
