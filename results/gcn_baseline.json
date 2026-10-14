@@ -1,0 +1,165 @@
+{
+ "kn": 6,
+ "filters": 128,
+ "steps": 6000,
+ "gcn": {
+  "域内": {
+   "section_acc": 0.9364,
+   "class_acc": 0.9679,
+   "d_mean_midpoint": 2.1057935264529317,
+   "d_mean_oracle_section_midpoint": 2.0215910850070435
+  },
+  "负荷偏移": {
+   "section_acc": 0.8563,
+   "class_acc": 0.8885,
+   "d_mean_midpoint": 2.6424578736391027,
+   "d_mean_oracle_section_midpoint": 2.0073842103971717
+  },
+  "高阻外推": {
+   "section_acc": 0.3847,
+   "class_acc": 0.4165,
+   "d_mean_midpoint": 9.686483415709215,
+   "d_mean_oracle_section_midpoint": 2.028570742738434
+  },
+  "噪声×3": {
+   "section_acc": 0.9079,
+   "class_acc": 0.9394,
+   "d_mean_midpoint": 2.2791849040695675,
+   "d_mean_oracle_section_midpoint": 2.0215910850070435
+  },
+  "线路阻抗+5%": {
+   "section_acc": 0.9169,
+   "class_acc": 0.9533,
+   "d_mean_midpoint": 2.1448674052779313,
+   "d_mean_oracle_section_midpoint": 2.027152418531314
+  },
+  "线路阻抗+10%": {
+   "section_acc": 0.8766,
+   "class_acc": 0.9165,
+   "d_mean_midpoint": 2.247749698354443,
+   "d_mean_oracle_section_midpoint": 2.027295086992207
+  },
+  "线路阻抗-10%": {
+   "section_acc": 0.8722,
+   "class_acc": 0.9027,
+   "d_mean_midpoint": 2.3274927243894514,
+   "d_mean_oracle_section_midpoint": 2.0289137143755203
+  },
+  "固定档位 域内": {
+   "section_acc": 0.9126666666666666,
+   "class_acc": 0.945,
+   "d_mean_midpoint": 2.143957111405867,
+   "d_mean_oracle_section_midpoint": 1.9886869913050305
+  },
+  "固定档位 负荷偏移": {
+   "section_acc": 0.827,
+   "class_acc": 0.8663333333333333,
+   "d_mean_midpoint": 2.7459936636561766,
+   "d_mean_oracle_section_midpoint": 2.0418090464003793
+  },
+  "固定档位 高阻外推": {
+   "section_acc": 0.3293333333333333,
+   "class_acc": 0.36033333333333334,
+   "d_mean_midpoint": 9.947160228355939,
+   "d_mean_oracle_section_midpoint": 1.9955031046459055
+  },
+  "固定档位 噪声×3": {
+   "section_acc": 0.8873333333333333,
+   "class_acc": 0.9196666666666666,
+   "d_mean_midpoint": 2.4041092052230635,
+   "d_mean_oracle_section_midpoint": 1.9886869913050305
+  },
+  "固定档位 阻抗+10%": {
+   "section_acc": 0.879,
+   "class_acc": 0.9176666666666666,
+   "d_mean_midpoint": 2.2847694530290767,
+   "d_mean_oracle_section_midpoint": 2.042666256762143
+  },
+  "固定档位 阻抗-10%": {
+   "section_acc": 0.8393333333333334,
+   "class_acc": 0.864,
+   "d_mean_midpoint": 2.5047403033984272,
+   "d_mean_oracle_section_midpoint": 1.9793715949896395
+  }
+ },
+ "gcn_delta": {
+  "域内": {
+   "section_acc": 0.9442,
+   "class_acc": 0.9742,
+   "d_mean_midpoint": 2.0604198998429832,
+   "d_mean_oracle_section_midpoint": 2.0215910850070435
+  },
+  "负荷偏移": {
+   "section_acc": 0.9188,
+   "class_acc": 0.9519,
+   "d_mean_midpoint": 2.0749762622348817,
+   "d_mean_oracle_section_midpoint": 2.0073842103971717
+  },
+  "高阻外推": {
+   "section_acc": 0.6747,
+   "class_acc": 0.7284,
+   "d_mean_midpoint": 5.572195130969241,
+   "d_mean_oracle_section_midpoint": 2.028570742738434
+  },
+  "噪声×3": {
+   "section_acc": 0.9005,
+   "class_acc": 0.9347,
+   "d_mean_midpoint": 2.3354493365955427,
+   "d_mean_oracle_section_midpoint": 2.0215910850070435
+  },
+  "线路阻抗+5%": {
+   "section_acc": 0.9025,
+   "class_acc": 0.9394,
+   "d_mean_midpoint": 2.068095290407107,
+   "d_mean_oracle_section_midpoint": 2.027152418531314
+  },
+  "线路阻抗+10%": {
+   "section_acc": 0.78,
+   "class_acc": 0.8272,
+   "d_mean_midpoint": 2.2016484688426488,
+   "d_mean_oracle_section_midpoint": 2.027295086992207
+  },
+  "线路阻抗-10%": {
+   "section_acc": 0.762,
+   "class_acc": 0.7921,
+   "d_mean_midpoint": 2.869368252610108,
+   "d_mean_oracle_section_midpoint": 2.0289137143755203
+  },
+  "固定档位 域内": {
+   "section_acc": 0.874,
+   "class_acc": 0.9106666666666666,
+   "d_mean_midpoint": 2.091047272654593,
+   "d_mean_oracle_section_midpoint": 1.9886869913050305
+  },
+  "固定档位 负荷偏移": {
+   "section_acc": 0.808,
+   "class_acc": 0.842,
+   "d_mean_midpoint": 2.611529112330881,
+   "d_mean_oracle_section_midpoint": 2.0418090464003793
+  },
+  "固定档位 高阻外推": {
+   "section_acc": 0.6716666666666666,
+   "class_acc": 0.73,
+   "d_mean_midpoint": 5.300392471005841,
+   "d_mean_oracle_section_midpoint": 1.9955031046459055
+  },
+  "固定档位 噪声×3": {
+   "section_acc": 0.8416666666666667,
+   "class_acc": 0.8836666666666667,
+   "d_mean_midpoint": 2.40578889641369,
+   "d_mean_oracle_section_midpoint": 1.9886869913050305
+  },
+  "固定档位 阻抗+10%": {
+   "section_acc": 0.754,
+   "class_acc": 0.8086666666666666,
+   "d_mean_midpoint": 2.316226041269801,
+   "d_mean_oracle_section_midpoint": 2.042666256762143
+  },
+  "固定档位 阻抗-10%": {
+   "section_acc": 0.8493333333333334,
+   "class_acc": 0.8853333333333333,
+   "d_mean_midpoint": 2.4435354594489502,
+   "d_mean_oracle_section_midpoint": 1.9793715949896395
+  }
+ }
+}
