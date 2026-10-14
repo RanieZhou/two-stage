@@ -124,7 +124,7 @@ def main():
     ap.add_argument("--data", type=Path, default=Path("data/generated"))
     ap.add_argument("--out", type=Path, default=Path("results"))
     ap.add_argument("--steps", type=int, default=6000)
-    ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），只评测常规场景，不运行 L1")
+    ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），不运行 L1")
     a = ap.parse_args()
     a.out.mkdir(exist_ok=True)
 
@@ -177,8 +177,10 @@ def main():
     print("阶段三参数", th, flush=True)
 
     results = {"thresholds": th.__dict__, "equivalence_classes": cls.tolist()}
+    if a.voltage_only:  # 仅电压的等价类更粗，另按含电流配置的 22 类划分统计区段准确率，便于与其余方法同口径比较
+        cls_ref = np.array(json.loads((Path("results") / "evaluation.json").read_text())["equivalence_classes"])
     for name, (fn, noise_scale) in SCENARIOS.items():
-        if not (a.data / fn).exists() or (a.voltage_only and name.startswith(L1_PREFIX)):
+        if not (a.data / fn).exists():
             continue
         ds = load_set(a.data / fn, net, rows, sigma, seed=202, noise_scale=noise_scale)
         lg = logits_of(model, features(ds["z"], sigma))
@@ -201,9 +203,12 @@ def main():
             res[name_v]["ECE"] = ece(r["conf"], cls[r["sec"]] == cls[ds["sec"]])
         r = decide(p, pen, j, al, ft, cls, th)
         ok, hi = cls[r["sec"]] == cls[ds["sec"]], r["conf"] >= 0.6
+        if a.voltage_only:
+            res["基准1 硬串联"]["class_acc_22类"] = float((cls_ref[top1] == cls_ref[ds["sec"]]).mean())
+            res["本方案(联合打分+候选扩展)"]["class_acc_22类"] = float((cls_ref[r["sec"]] == cls_ref[ds["sec"]]).mean())
         res["置信度C"] = dict(高置信占比=float(hi.mean()), 高置信准确率=float(ok[hi].mean()) if hi.any() else float("nan"),
                             低置信准确率=float(ok[~hi].mean()) if (~hi).any() else float("nan"), ECE=ece(r["conf"], ok))
-        if name.startswith(L1_PREFIX):
+        if name.startswith(L1_PREFIX) and not a.voltage_only:
             with np.load(a.data / fn) as f:
                 dv_own = noisy_dv(net, {"dv": f["dv"]}, l1_own.pmu_idx, noise_scale, seed=303)
             res.update(l1_results(l1_same, "L1(同测点)", net, ds, a.data / fn, noise_scale, ds["z"][:, isv], cls, top1,
