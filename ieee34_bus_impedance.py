@@ -90,11 +90,9 @@ def read_fixed_elements():
     return elems
 
 
-def read_load_admittances():
-    """按故障前工作点把每个负荷等值为恒阻抗，返回 [(节点列表, Y 矩阵)]。
-
-    Y 单位西门子。星形负荷为各相对地导纳，三角形负荷为线间导纳。
-    """
+def read_load_branches():
+    """按故障前工作点读取每个负荷的支路：节点对 (a, b)，b 为 None 表示接地；支路复功率 s（VA）、
+    支路电压幅值平方的均值 v2、OpenDSS 负荷模型号。星形负荷为各相对地支路，三角形负荷为线间支路。"""
     out = []
     for name in dss.Loads.AllNames():
         dss.Loads.Name(name)
@@ -107,15 +105,22 @@ def read_load_admittances():
             branches = [(terminals[0], terminals[1])] if dss.CktElement.NumPhases() == 1 else list(zip(nodes, nodes[1:] + nodes[:1]))
         else:
             branches = [(n, None) for n in nodes]
-        s_branch = s_total / len(branches)
-        # 各支路取同一导纳（按平均支路电压平方），与 OpenDSS 恒阻抗负荷三相对称的处理一致
+        # 各支路取同一电压平方（平均值），与 OpenDSS 恒阻抗负荷三相对称的处理一致
         v2 = np.mean([abs(v[a] - (v[b] if b else 0)) ** 2 for a, b in branches])
         for a, b in branches:
-            y = np.conj(s_branch) / v2
-            if b:
-                out.append(([a, b], y * np.array([[1, -1], [-1, 1]])))
-            else:
-                out.append(([a], np.array([[y]])))
+            out.append(dict(a=a, b=b, s=s_total / len(branches), v2=v2, model=dss.Loads.Model()))
+    return out
+
+
+def read_load_admittances():
+    """按故障前工作点把每个负荷等值为恒阻抗，返回 [(节点列表, Y 矩阵)]，Y 单位西门子。"""
+    out = []
+    for br in read_load_branches():
+        y = np.conj(br["s"]) / br["v2"]
+        if br["b"]:
+            out.append(([br["a"], br["b"]], y * np.array([[1, -1], [-1, 1]])))
+        else:
+            out.append(([br["a"]], np.array([[y]])))
     return out
 
 
@@ -153,11 +158,14 @@ class Network:
             s["y"] = scale_line_yprim(s["y"], line_z_scale)
         self.section_index = {s["name"]: i for i, s in enumerate(self.sections)}
         self.nodes = [n.lower() for n in dss.Circuit.AllNodeNames()]
-        self._fixed = read_fixed_elements() + read_load_admittances()
+        self._elements = read_fixed_elements()
+        self._loads = read_load_admittances()
         self.distance_km = self._bus_distances()
         slot = {n.lower(): k for k, n in enumerate(dss.Circuit.AllNodeNames())}
         v = _complex(dss.Circuit.AllBusVolts())
-        self.v_ref = np.array([abs(v[slot[n]]) for n in self.nodes])
+        self.v_pre = np.array([v[slot[n]] for n in self.nodes])
+        self.v_ref = np.abs(self.v_pre)
+        self.load_branches = read_load_branches()
 
     def _bus_distances(self):
         """各母线到变电站的沿线距离（km），变压器与调压器视为零长度。"""
@@ -173,6 +181,7 @@ class Network:
             b = [x.split(".")[0].lower() for x in dss.CktElement.BusNames()]
             adj.setdefault(b[0], []).append((b[1], 0.0))
             adj.setdefault(b[1], []).append((b[0], 0.0))
+        self.adj = adj
         dist = {"800": 0.0}
         stack = ["800"]
         while stack:
@@ -189,10 +198,10 @@ class Network:
         d1, d2 = self.distance_km[s["bus1"]], self.distance_km[s["bus2"]]
         return d1 + alpha * (d2 - d1)
 
-    def assemble(self, split=None):
+    def assemble(self, split=None, loads=True):
         """装配节点导纳矩阵（电源内阻抗作为接地并联导纳）。
 
-        split=(区段序号, alpha) 时该线路在 alpha 处拆成两段并新增故障节点 fx.<相>。
+        split=(区段序号, alpha) 时该线路在 alpha 处拆成两段并新增故障节点 fx.<相>；loads=False 时不含负荷导纳。
         返回 (Y, 节点名列表, 故障节点索引列表)。
         """
         nodes = list(self.nodes)
@@ -213,7 +222,7 @@ class Network:
                     if ib is not None:
                         y[ia, ib] += ym[a, b]
 
-        for names, ym in self._fixed:
+        for names, ym in self._elements + (self._loads if loads else []):
             add(names, ym)
         for i, s in enumerate(self.sections):
             if split is not None and i == split[0]:

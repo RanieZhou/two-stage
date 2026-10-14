@@ -10,6 +10,10 @@
   test_zscale.npz --n 10000 --seed 7  --rf 0.01 300 --mult 0.6 1.1 --line-z-scale 1.1
   test_z105.npz  --n 10000 --seed 13 --rf 0.01 300 --mult 0.6 1.1 --line-z-scale 1.05
   test_z090.npz  --n 10000 --seed 14 --rf 0.01 300 --mult 0.6 1.1 --line-z-scale 0.9
+  与 L1 对比的调压器档位固定场景（均加 --fixed-taps，各 3000 样本）：
+  fx_in.npz --seed 21 --rf 0.01 300 --mult 0.6 1.1；fx_load.npz --seed 22 --rf 0.01 300 --mult 1.25 1.5；
+  fx_rf.npz --seed 23 --rf 300 1000 --mult 0.6 1.1；fx_zp.npz --seed 24 --line-z-scale 1.1；fx_zm.npz --seed 25 --line-z-scale 0.9
+  （fx_zp、fx_zm 的 --rf 0.01 300 --mult 0.6 1.1）
 用法：python evaluate_pipeline.py --data data/generated --out results
 """
 import argparse
@@ -19,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
+from baseline_l1 import TOP_K, L1Locator, greedy_pmu_placement, noisy_dv, run_l1
 from cross_stage_verifier import Thresholds, decide, equivalence_classes, fit_lambda
 from ieee34_bus_impedance import SENSORS, Network, add_measurement_noise
 from stage1_classifier import features, logits_of, probabilities, train
@@ -40,7 +45,15 @@ SCENARIOS = {
     "线路阻抗+5%": ("test_z105.npz", 1.0),
     "线路阻抗+10%": ("test_zscale.npz", 1.0),
     "线路阻抗-10%": ("test_z090.npz", 1.0),
+    # 调压器档位固定、网络参数精确已知的场景，满足 L1 的前提；同时运行 L1
+    "固定档位 域内": ("fx_in.npz", 1.0),
+    "固定档位 负荷偏移": ("fx_load.npz", 1.0),
+    "固定档位 高阻外推": ("fx_rf.npz", 1.0),
+    "固定档位 噪声×3": ("fx_in.npz", 3.0),
+    "固定档位 阻抗+10%": ("fx_zp.npz", 1.0),
+    "固定档位 阻抗-10%": ("fx_zm.npz", 1.0),
 }
+L1_PREFIX = "固定档位"
 
 
 def load_set(path, net, rows, sigma, seed, noise_scale=1.0):
@@ -86,6 +99,25 @@ def summarize(net, sec, alpha, ds, cls, stage1_top1):
     )
 
 
+def l1_results(l1, label, net, ds, path, noise_scale, dv_pmu, cls, top1, cache):
+    """运行（或读取缓存的）L1，返回阶段一召回与两种阶段二流程的指标；dv_pmu 为 L1 自己 μPMU 处的带噪电压突变量。"""
+    with np.load(path) as f:
+        d = {k: f[k] for k in f.files}  # 先读入内存，避免多进程共享压缩文件句柄
+    mi = l1.stage1(dv_pmu)
+    if cache.exists():
+        c = np.load(cache)
+        k1, a1, k2, a2 = (c[k] for k in ("k1", "a1", "k2", "a2"))
+    else:
+        k1, a1, k2, a2 = run_l1(l1, d, mi, noise_scale)
+        np.savez_compressed(cache, k1=k1, a1=a1, k2=k2, a2=a2)
+    order = np.argsort(mi, axis=1)
+    return {
+        f"{label} 阶段一Top-K类别召回": {k: float((cls[order[:, :k]] == cls[ds["sec"]][:, None]).any(1).mean()) for k in (1, 2, 5)},
+        f"{label} 论文流程": summarize(net, k1, a1, ds, cls, top1),
+        f"{label} 全候选线路细化": summarize(net, k2, a2, ds, cls, top1),
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, default=Path("data/generated"))
@@ -96,7 +128,14 @@ def main():
 
     net = Network()
     rows = net.sensor_rows(SENSORS)
+    # L1 两种测点：与本方案相同的 5 个测点母线；L1 按自身布点目标（前 k 命中率）选取的 5 个母线
+    l1_same = L1Locator(net, [net.nodes[r] for r in rows if r < len(net.nodes)])
+    with np.load(a.data / "analysis.npz") as f:
+        own_nodes, own_buses = greedy_pmu_placement(net, f["dv"][:3000].astype(complex), f["sec"][:3000])
+    l1_own = L1Locator(net, own_nodes)
+    print("L1 自身布点母线", own_buses, flush=True)
     sigma = net.measurement_sigma(rows)
+    isv = rows < len(net.nodes)
     libs = [Network(line_z_scale=z).response_library(ALPHAS) for z in Z_SCALES]
     prior_pen = [Z_PRIOR_WEIGHT * ((z - 1) / Z_PRIOR_SIGMA) ** 2 for z in Z_SCALES]
     pm = PhysicsModel(net, libs, prior_pen, rows, sigma, EPS_REL, EPS_ABS)
@@ -157,6 +196,13 @@ def main():
         ok, hi = cls[r["sec"]] == cls[ds["sec"]], r["conf"] >= 0.6
         res["置信度C"] = dict(高置信占比=float(hi.mean()), 高置信准确率=float(ok[hi].mean()) if hi.any() else float("nan"),
                             低置信准确率=float(ok[~hi].mean()) if (~hi).any() else float("nan"), ECE=ece(r["conf"], ok))
+        if name.startswith(L1_PREFIX):
+            with np.load(a.data / fn) as f:
+                dv_own = noisy_dv(net, {"dv": f["dv"]}, l1_own.pmu_idx, noise_scale, seed=303)
+            res.update(l1_results(l1_same, "L1(同测点)", net, ds, a.data / fn, noise_scale, ds["z"][:, isv], cls, top1,
+                                  a.data / f"l1_{fn[:-4]}_n{noise_scale}_k{TOP_K}.npz"))
+            res.update(l1_results(l1_own, "L1(自身布点)", net, ds, a.data / fn, noise_scale, dv_own, cls, top1,
+                                  a.data / f"l1own_{fn[:-4]}_n{noise_scale}_k{TOP_K}.npz"))
         res["λ扫描(Top-2,无候选扩展)"] = {}
         for mult in (0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0):
             r = decide(p, pen, j, al, ft, cls, Thresholds(th.lam * mult, th.j_threshold), expand=False)

@@ -69,9 +69,11 @@ class Simulator:
     """持有一个已拆线的 OpenDSS 电路，按样本参数生成突变量。
 
     阻抗模型 Network 始终取算例原始参数，line_z_scale 只改变仿真所用线路的串联阻抗。
+    fixed_taps 为真时调压器档位固定在名义负荷下的位置，不随各样本的负荷倍率重新调节。
     """
 
-    def __init__(self, line_z_scale=1.0):
+    def __init__(self, line_z_scale=1.0, fixed_taps=False):
+        self.fixed_taps = fixed_taps
         self.net = Network()
         load_circuit()
         self.base_len = split_lines(self.net)
@@ -98,11 +100,12 @@ class Simulator:
         return v, np.concatenate(i)
 
     def run(self, sec, alpha, ftype, rf, load_mult):
-        """返回 (ΔV, ΔI, 故障电流)；未收敛时抛出异常。"""
+        """返回 (ΔV, ΔI, 故障电流, 故障前电压, 故障前电流)；未收敛时抛出异常。"""
         line = self.net.sections[sec]["name"]
         dss.Command(f"Set LoadMult={load_mult}")
         dss.Command("Fault.F1.enabled=no")
-        dss.Command("Set ControlMode=STATIC")
+        if not self.fixed_taps:
+            dss.Command("Set ControlMode=STATIC")
         dss.Command("Solve")
         dss.Command("Set ControlMode=OFF")
         v0, i0 = self._measure()
@@ -115,7 +118,7 @@ class Simulator:
         dss.Circuit.SetActiveElement("Fault.F1")
         c = len(FAULT_TYPES[ftype][1])
         i_f = _complex(dss.CktElement.Currents())[:c]
-        return v1 - v0, i1 - i0, i_f
+        return v1 - v0, i1 - i0, i_f, v0, i0
 
 
 def sample_records(rng, sections, n, rf_range, mult_range, by_length=True):
@@ -135,21 +138,23 @@ def sample_records(rng, sections, n, rf_range, mult_range, by_length=True):
 
 _sim = None
 _line_z_scale = 1.0
+_fixed_taps = False
 
 
 def _work(recs):
     global _sim
     if _sim is None:
-        _sim = Simulator(_line_z_scale)
+        _sim = Simulator(_line_z_scale, _fixed_taps)
     out = []
     for r in recs:
         out.append(_sim.run(*r))
     return out
 
 
-def generate(n, seed, rf_range, mult_range, workers, by_length=True, line_z_scale=1.0):
-    global _line_z_scale
+def generate(n, seed, rf_range, mult_range, workers, by_length=True, line_z_scale=1.0, fixed_taps=False):
+    global _line_z_scale, _fixed_taps
     _line_z_scale = line_z_scale
+    _fixed_taps = fixed_taps
     net_sections = Network().sections
     rng = np.random.default_rng(seed)
     recs = sample_records(rng, net_sections, n, rf_range, mult_range, by_length)
@@ -162,6 +167,8 @@ def generate(n, seed, rf_range, mult_range, workers, by_length=True, line_z_scal
         load_mult=np.array([r[4] for r in recs]),
         dv=np.array([f[0] for f in flat], dtype=np.complex64),
         di=np.array([f[1] for f in flat], dtype=np.complex64),
+        v0=np.array([f[3] for f in flat], dtype=np.complex64),
+        i0=np.array([f[4] for f in flat], dtype=np.complex64),
     )
 
 
@@ -172,12 +179,13 @@ if __name__ == "__main__":
     ap.add_argument("--rf", type=float, nargs=2, default=(0.01, 1000.0))
     ap.add_argument("--mult", type=float, nargs=2, default=(0.6, 1.2))
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--fixed-taps", action="store_true", help="调压器档位固定在名义负荷下的位置")
     ap.add_argument("--line-z-scale", type=float, default=1.0, help="仿真线路串联阻抗相对建模参数的倍数")
     ap.add_argument("--uniform-sections", action="store_true", help="各区段等概率而非按长度加权")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     a.out = a.out.resolve()  # OpenDSS 编译会切换工作目录
-    data = generate(a.n, a.seed, a.rf, a.mult, a.workers, not a.uniform_sections, a.line_z_scale)
+    data = generate(a.n, a.seed, a.rf, a.mult, a.workers, not a.uniform_sections, a.line_z_scale, a.fixed_taps)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(a.out, **data)
     print(f"saved {a.n} samples -> {a.out}")
