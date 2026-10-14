@@ -16,6 +16,10 @@
   （fx_zp、fx_zm 的 --rf 0.01 300 --mult 0.6 1.1）
 用法：python evaluate_pipeline.py --data data/generated --out results
 消融（测点只用电压）：python evaluate_pipeline.py --voltage-only --out results/voltage_only
+阶段一换成 GCN（先由 baseline_gcn.py --export-probs 导出区段概率）：
+  python evaluate_pipeline.py --stage1-probs data/generated/gcn_delta_probs.npz --out results/gcn_stage1
+  加 --ensemble 则取 MLP 与 GCN 概率的平均（--out results/ensemble_stage1）
+非线性精化（每个场景前 N 个样本，耗时长）：python evaluate_pipeline.py --refine 600 --out results/refine
 """
 import argparse
 import json
@@ -28,7 +32,11 @@ from baseline_l1 import TOP_K, L1Locator, greedy_pmu_placement, noisy_dv, run_l1
 from cross_stage_verifier import Thresholds, decide, equivalence_classes, fit_lambda
 from ieee34_bus_impedance import SENSORS, Network, add_measurement_noise
 from stage1_classifier import features, logits_of, probabilities, train
+from scipy.optimize import minimize_scalar
+from scipy.special import logsumexp
+
 from stage2_continuous_fse import ALPHAS, PhysicsModel
+from stage2_nonlinear_refine import RF_GATE, refine_batch
 
 EPS_REL = 0.02       # 线性化模型误差：相对本量测幅值的部分
 EPS_ABS = 0.01       # 线性化模型误差：相对同类量测最大幅值的部分
@@ -119,11 +127,74 @@ def l1_results(l1, label, net, ds, path, noise_scale, dv_pmu, cls, top1, cache):
     }
 
 
+REFINE_Z = Z_SCALES   # 非线性精化的线路阻抗假设，与线性阶段相同
+
+
+def refine_candidates(sigma, z, pre_clean, noise_scale, cand, al0, ft0, fixed_taps, cache, seed):
+    """对每个样本的候选 cand (n, 2) 做非线性精化，返回 (J 含阻抗先验惩罚, alpha, 估计的 Rf)，形状均为 (n, 2)；结果按 cache 缓存。
+    pre_clean 为无噪的故障前测点相量，函数内叠加与突变量同强度的量测噪声。"""
+    if cache.exists():
+        out = np.load(cache)["out"]
+    else:
+        rng = np.random.default_rng(seed)
+        sig_pre = noise_scale * sigma / np.sqrt(2)
+        pre = pre_clean + sig_pre * (rng.standard_normal(pre_clean.shape) + 1j * rng.standard_normal(pre_clean.shape))
+        out = refine_batch(z, pre, cand, al0, ft0, sigma, EPS_REL, EPS_ABS, sig_pre, fixed_taps, REFINE_Z)
+        np.savez_compressed(cache, out=out)
+    prior = np.array([Z_PRIOR_WEIGHT * ((s - 1) / Z_PRIOR_SIGMA) ** 2 for s in REFINE_Z])
+    tot = out[..., 0] + prior
+    best = tot.argmin(2)[..., None]
+    pick = lambda x: np.take_along_axis(x, best, 2)[..., 0]
+    return pick(tot), pick(out[..., 1]), pick(out[..., 2])
+
+
+def fit_lambda_candidates(logp, pen, same):
+    """在候选集内最大化真实等价类的联合后验似然，得到非线性残差的权重 λ。"""
+    keep = same.any(1)
+
+    def nll(log_lam):
+        s = logp[keep] - np.exp(log_lam) * pen[keep]
+        return -(logsumexp(np.where(same[keep], s, -np.inf), axis=1) - logsumexp(s, axis=1)).mean()
+
+    return float(np.exp(minimize_scalar(nll, bounds=(-9, 4), method="bounded").x))
+
+
+def refinement_report(a, net, rows, sigma, name, fn, noise_scale, stage, ds, p, al, ft, r, lam_nl, cls, top1):
+    """本方案（线性阶段二+阶段三）在前 n 个样本上，加非线性精化后的两种用法：
+    R1 只精化所选区段的位置；R2 对阶段一前两名候选都精化，再用 ln P − λ_nl·J_nl 重新选择区段。"""
+    n = a.refine
+    cand = np.argsort(-p[:n], axis=1)[:, :2]
+    idx = np.arange(n)[:, None]
+    with np.load(a.data / fn) as f:
+        pre_clean = np.concatenate([f["v0"][:n], f["i0"][:n]], 1)[:, rows].astype(complex)
+    tot, alpha_nl, rf_nl = refine_candidates(sigma, ds["z"][:n], pre_clean, noise_scale, cand, al[:n][idx, cand], ft[:n][idx, cand],
+                                      name.startswith(L1_PREFIX), a.data / f"refine_{fn[:-4]}_n{noise_scale}_{n}_{stage}.npz", seed=404)
+    sub = {"sec": ds["sec"][:n], "d_true": ds["d_true"][:n]}
+    sec_lin, rule = r["sec"][:n], r["rule"][:n]
+    at = lambda sec: (cand == sec[:, None])
+    # 估计 Rf 超过 RF_GATE 的候选不采用精化结果
+    use = lambda sec: at(sec).any(1) & ((rf_nl * at(sec)).sum(1) < RF_GATE)
+    alpha_r1 = np.where(use(sec_lin), (alpha_nl * at(sec_lin)).sum(1), r["alpha"][:n])
+    pick = (np.log(p[:n][idx, cand] + 1e-12) - lam_nl * tot).argmax(1)
+    sec_r2 = np.where((rule == 0) & (rf_nl < RF_GATE).all(1), cand[np.arange(n), pick], sec_lin)
+    alpha_r2 = np.where(use(sec_r2), (alpha_nl * at(sec_r2)).sum(1), r["alpha"][:n])
+    return {
+        "样本数": n,
+        "线性阶段二+阶段三(本方案)": summarize(net, sec_lin, r["alpha"][:n], sub, cls, top1[:n]),
+        "R1 位置精化": summarize(net, sec_lin, alpha_r1, sub, cls, top1[:n]),
+        "R2 位置精化+候选重排": {**summarize(net, sec_r2, alpha_r2, sub, cls, top1[:n]), "改判率": float((sec_r2 != sec_lin).mean())},
+        "lambda_nl": lam_nl,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, default=Path("data/generated"))
     ap.add_argument("--out", type=Path, default=Path("results"))
     ap.add_argument("--steps", type=int, default=6000)
+    ap.add_argument("--stage1-probs", type=Path, help="用外部阶段一（如 GCN）导出的区段概率 npz 替换 MLP 的概率")
+    ap.add_argument("--ensemble", action="store_true", help="与 --stage1-probs 合用：阶段一概率取 MLP 与外部概率的算术平均")
+    ap.add_argument("--refine", type=int, default=0, help="每个场景取前 N 个样本做非线性精化评测（耗时），0 为不做")
     ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），不运行 L1")
     a = ap.parse_args()
     a.out.mkdir(exist_ok=True)
@@ -170,21 +241,37 @@ def main():
     print("等价类数", cls.max() + 1, [list(np.where(cls == c)[0]) for c in range(cls.max() + 1) if (cls == c).sum() > 1], flush=True)
 
     # ---- 阶段三标定：名义验证集 ----
-    p_val = probabilities(lg_val)
+    ext = np.load(a.stage1_probs) if a.stage1_probs else None
+    p_val = probabilities(lg_val) if ext is None else (ext["val"] + probabilities(lg_val)) / 2 if a.ensemble else ext["val"]
     pen_v, j_v, al_v, ft_v = physics_cached(pm, val["z"], a.data / f"phys_val_n1.0_{tag}.npz")
     j_true = j_v[np.arange(len(val["sec"])), val["sec"]]
     th = Thresholds(lam=fit_lambda(p_val, pen_v, cls, val["sec"]), j_threshold=float(np.quantile(j_true, 0.99)))
     print("阶段三参数", th, flush=True)
 
     results = {"thresholds": th.__dict__, "equivalence_classes": cls.tolist()}
+    stage = "mlp" if ext is None else "ens" if a.ensemble else "gcn"
+    if a.refine:  # 非线性残差的权重 λ_nl：在带故障前相量的验证集（val_gcn）前 N 个样本上标定
+        vg = np.load(a.data / "val_gcn.npz")
+        n = a.refine
+        zv = add_measurement_noise(np.random.default_rng(101), vg["zc"].astype(complex), sigma)[:n]
+        pv = ext["val_gcn"][:n] if ext is not None else probabilities(logits_of(model, features(zv, sigma)))
+        cand = np.argsort(-pv, axis=1)[:, :2]
+        _, _, al_c, ft_c = pm.fit_candidates(zv, cand)
+        tot, _, rf_v = refine_candidates(sigma, zv, vg["pre"][:n].astype(complex), 1.0, cand, al_c, ft_c.astype(int), False,
+                                   a.data / f"refine_val_n1.0_{n}_{stage}.npz", seed=404)
+        same = cls[cand] == cls[vg["sec"][:n]][:, None]
+        gate = (rf_v < RF_GATE).all(1)   # 与使用时相同：只在两个候选的估计 Rf 都低于 RF_GATE 时重排
+        lam_nl = fit_lambda_candidates(np.log(np.take_along_axis(pv, cand, 1)[gate] + 1e-12), tot[gate], same[gate])
+        print("非线性精化 λ_nl", lam_nl, "校准样本数", int(gate.sum()), flush=True)
     if a.voltage_only:  # 仅电压的等价类更粗，另按含电流配置的 22 类划分统计区段准确率，便于与其余方法同口径比较
         cls_ref = np.array(json.loads((Path("results") / "evaluation.json").read_text())["equivalence_classes"])
     for name, (fn, noise_scale) in SCENARIOS.items():
         if not (a.data / fn).exists():
             continue
         ds = load_set(a.data / fn, net, rows, sigma, seed=202, noise_scale=noise_scale)
-        lg = logits_of(model, features(ds["z"], sigma))
-        p = probabilities(lg)
+        p = probabilities(logits_of(model, features(ds["z"], sigma)))
+        if ext is not None:
+            p = (ext[name] + p) / 2 if a.ensemble else ext[name]
         pen, j, al, ft = physics_cached(pm, ds["z"], a.data / f"phys_{fn[:-4]}_n{noise_scale}_{tag}.npz")
         order = np.argsort(-p, axis=1)
         top1 = order[:, 0]
@@ -215,6 +302,8 @@ def main():
                                   a.data / f"l1_{fn[:-4]}_n{noise_scale}_k{TOP_K}.npz"))
             res.update(l1_results(l1_own, "L1(自身布点)", net, ds, a.data / fn, noise_scale, dv_own, cls, top1,
                                   a.data / f"l1own_{fn[:-4]}_n{noise_scale}_k{TOP_K}.npz"))
+        if a.refine:
+            res["非线性精化"] = refinement_report(a, net, rows, sigma, name, fn, noise_scale, stage, ds, p, al, ft, r, lam_nl, cls, top1)
         res["λ扫描(Top-2,无候选扩展)"] = {}
         for mult in (0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0):
             r = decide(p, pen, j, al, ft, cls, Thresholds(th.lam * mult, th.j_threshold), expand=False)

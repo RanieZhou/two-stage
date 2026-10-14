@@ -177,6 +177,16 @@ def predict(model, builder, d, noise_scale, seed):
     return np.concatenate(out)
 
 
+@torch.no_grad()
+def predict_probs(model, builder, z):
+    """突变量输入：对已带噪的复数量测 z (N, m) 预测区段概率，供其余阶段直接使用同一组观测。"""
+    out = []
+    for lo in range(0, len(z), 2000):
+        x = builder.standardize(builder.build(z[lo:lo + 2000], None))
+        out.append(torch.softmax(model(torch.from_numpy(x)), 1).numpy())
+    return np.concatenate(out)
+
+
 def load_raw(path, rows):
     """返回 sec、测点行的突变量 zc 与故障前相量 pre；原始数据集与 --prepare 的输出都可读。"""
     with np.load(path) as f:
@@ -204,6 +214,7 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--modes", nargs="+", default=["gcn", "gcn_delta"])
     ap.add_argument("--val-only", action="store_true", help="只在验证集上评估，用于选择超参数")
+    ap.add_argument("--export-probs", type=Path, help="gcn_delta 模式：导出验证集（val、val_gcn）与各场景（与评测脚本相同的带噪观测）上的区段概率")
     ap.add_argument("--prepare", nargs=2, type=Path, metavar=("SRC", "DST"), help="从含 v0、i0 的数据集提取测点量测行")
     a = ap.parse_args()
 
@@ -246,6 +257,14 @@ def main():
             )
             print(mode, name, json.dumps(res[name], ensure_ascii=False), flush=True)
         results[mode] = res
+        if a.export_probs and mode == "gcn_delta":
+            probs = {"val": predict_probs(model, builder, load_set(a.data / "val.npz", net, rows, sigma, seed=101)["z"])}
+            for name, (fn, noise_scale) in SCENARIOS.items():
+                if (a.data / fn).exists():
+                    probs[name] = predict_probs(model, builder, load_set(a.data / fn, net, rows, sigma, seed=202, noise_scale=noise_scale)["z"])
+            d = load_raw(a.data / "val_gcn.npz", rows)   # 带故障前相量的验证集，供非线性精化标定
+            probs["val_gcn"] = predict_probs(model, builder, add_measurement_noise(np.random.default_rng(101), d["zc"], sigma))
+            np.savez_compressed(a.export_probs, **probs)
     if not a.val_only:
         a.out.write_text(json.dumps(results, ensure_ascii=False, indent=1))
 
