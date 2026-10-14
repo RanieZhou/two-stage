@@ -1,6 +1,6 @@
 """全流程评测：训练阶段一、标定阶段三，在各场景下对比方法并输出 CR、FCR、测距误差、消融、置信度与耗时。
 
-数据集由 simulate_dataset.py 生成（目录 data/generated，已被 git 忽略），命令如下：
+数据集由 simulate_dataset.py 生成（目录 data/generated，经 Git LFS 存入仓库），命令如下：
   train.npz      --n 80000 --seed 1  --rf 0.01 300  --mult 0.6 1.1
   val.npz        --n 20000 --seed 2  --rf 0.01 300  --mult 0.6 1.1
   test_in.npz    --n 10000 --seed 3  --rf 0.01 300  --mult 0.6 1.1
