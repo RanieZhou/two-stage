@@ -246,6 +246,9 @@ def main():
     ap.add_argument("--limit-val", type=int, default=0, help="验证集只取前 N 个样本")
     ap.add_argument("--limit-test", type=int, default=0, help="各测试场景只取前 N 个样本")
     ap.add_argument("--train-extra", nargs="+", default=[], help="并入阶段一训练集的其他数据集文件名（如不同线路阻抗倍率下的 ieee123_train_z0.88.npz）")
+    ap.add_argument("--seed", type=int, default=0, help="阶段一训练的随机种子（初始化与批次采样）")
+    ap.add_argument("--no-l1", action="store_true", help="不运行 L1（多种子评测时 L1 与种子无关）")
+    ap.add_argument("--no-timing", action="store_true", help="不测推断耗时")
     ap.add_argument("--hidden", type=int, nargs=3, default=None, help="阶段一 MLP 隐层宽度，默认 160 160 96")
     ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），不运行 L1")
     a = ap.parse_args()
@@ -260,7 +263,7 @@ def main():
     if a.voltage_only:
         rows = rows[rows < len(net.nodes)]
         tag += "_V"
-    elif a.case == "ieee34":
+    elif a.case == "ieee34" and not a.no_l1:
         # L1 两种测点：与本方案相同的 5 个测点母线；L1 按自身布点目标（前 k 命中率）选取的 5 个母线
         l1_same = L1Locator(net, [net.nodes[r] for r in rows if r < len(net.nodes)])
         with np.load(fp("analysis.npz")) as f:
@@ -286,14 +289,14 @@ def main():
             extra["zc"] = extra["zc"][:, net.sensor_rows(case["sensors"]) < len(net.nodes)]
         tr = {k: np.concatenate([tr[k], extra[k]]) for k in ("sec", "zc")}
     zc_tr = tr["zc"]
-    rng = np.random.default_rng(0)
+    rng = np.random.default_rng(a.seed)
 
     def make_batch(b):
         i = rng.integers(0, len(zc_tr), b)
         return features(add_measurement_noise(rng, zc_tr[i], sigma), sigma), tr["sec"][i].astype(np.int64)
 
     t0 = time.time()
-    model = train(make_batch, 3 * len(rows) + 1, n_sec, steps=a.steps, hidden=tuple(a.hidden) if a.hidden else None)
+    model = train(make_batch, 3 * len(rows) + 1, n_sec, steps=a.steps, seed=a.seed, hidden=tuple(a.hidden) if a.hidden else None)
     print(f"stage1 trained in {time.time() - t0:.0f}s", flush=True)
 
     # ---- 等价类 ----
@@ -373,7 +376,7 @@ def main():
             res["本方案(联合打分+候选扩展)"]["class_acc_22类"] = float((cls_ref[r["sec"]] == cls_ref[ds["sec"]]).mean())
         res["置信度C"] = dict(高置信占比=float(hi.mean()), 高置信准确率=float(ok[hi].mean()) if hi.any() else float("nan"),
                             低置信准确率=float(ok[~hi].mean()) if (~hi).any() else float("nan"), ECE=ece(r["conf"], ok))
-        if name.startswith(L1_PREFIX) and not a.voltage_only:
+        if name.startswith(L1_PREFIX) and not a.voltage_only and not a.no_l1:
             with np.load(a.data / fn) as f:
                 dv_own = noisy_dv(net, {"dv": f["dv"]}, l1_own.pmu_idx, noise_scale, seed=303)
             res.update(l1_results(l1_same, "L1(同测点)", net, ds, a.data / fn, noise_scale, ds["z"][:, isv], cls, top1,
@@ -390,6 +393,9 @@ def main():
         print(name, json.dumps(res, ensure_ascii=False, indent=1), flush=True)
 
     # ---- 推断耗时：1000 个域内样本 ----
+    if a.no_timing:
+        (a.out / "evaluation.json").write_text(json.dumps(results, ensure_ascii=False, indent=1))
+        return
     ds = load_set(fp("test_in.npz"), net, rows, sigma, seed=202)
     z = ds["z"][:1000]
     t0 = time.perf_counter()

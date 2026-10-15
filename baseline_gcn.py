@@ -213,6 +213,7 @@ def main():
     ap.add_argument("--val-only", action="store_true", help="只在验证集上评估，用于选择超参数")
     ap.add_argument("--export-probs", type=Path, help="gcn_delta 模式：导出验证集（val、val_gcn）与各场景（与评测脚本相同的带噪观测）上的区段概率")
     ap.add_argument("--train-extra", nargs="+", default=[], help="并入训练集的其他数据集文件名（不同线路阻抗倍率下的数据，需含故障前相量）")
+    ap.add_argument("--seed", type=int, default=0, help="训练的随机种子")
     ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34")
     ap.add_argument("--prepare", nargs=2, type=Path, metavar=("SRC", "DST"), help="从含 v0、i0 的数据集提取测点量测行")
     a = ap.parse_args()
@@ -237,7 +238,7 @@ def main():
     results = {"kn": a.kn, "filters": a.filters, "steps": a.steps}
     for mode in a.modes:
         builder = InputBuilder(net, buses, case["sensors"], mode, sigma, train, np.random.default_rng(1))
-        model = train_gcn(builder, lap, train, n_sec, a.filters, a.steps, a.batch, a.lr)
+        model = train_gcn(builder, lap, train, n_sec, a.filters, a.steps, a.batch, a.lr, a.seed)
         res = {}
         # 等价类来自 evaluate_pipeline.py；仅 --val-only 调参时允许缺省
         cls = np.array(json.loads(eval_json.read_text())["equivalence_classes"]) if eval_json.exists() else None
