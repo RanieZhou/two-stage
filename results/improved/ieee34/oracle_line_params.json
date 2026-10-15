@@ -1,0 +1,14 @@
+{
+ "n": 2500,
+ "class_acc": {
+  "stage1_top1": 89.2,
+  "joint_nominal": 89.68,
+  "joint_oracle": 92.67999999999999
+ },
+ "distance_err_km_true_section": {
+  "mean_nominal": 0.8221251599387793,
+  "mean_oracle": 0.41610864802742165,
+  "median_nominal": 0.5870508623142996,
+  "median_oracle": 0.22506968208863576
+ }
+}
