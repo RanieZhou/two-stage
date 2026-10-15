@@ -8,6 +8,8 @@ IEEE JSAC 2020，arXiv:1812.09464）。无官方代码，按论文描述复现�
 适配：类别为 30 个故障区段（论文为故障母线）；论文没有位置回归，故障点取预测区段的中点（α=0.5）。
 论文输入需要故障前相量，而 train.npz、val.npz 没有保存 v0、i0：用相同参数重新生成（含 v0、i0）后，
 由 --prepare 只保留测点量测行，得到 train_gcn.npz、val_gcn.npz（区段、位置、突变量 zc 与故障前相量 pre）。
+--arch gat：把切比雪夫卷积换成多头图注意力层（Liang 等，*Fault location method for distribution networks based on multi-head graph attention networks*，
+Frontiers in Energy Research 2024）：3 层 4 头 GAT，注意力限于物理相邻母线（含自环），其后同样接两层全连接；输入与训练方式同 GCN。
 两种输入：
   * 论文输入（"gcn"）：故障期间的电压、电流相量（故障前相量 + 突变量，叠加量测噪声）；
   * 突变量输入（"gcn_delta"）：与本方案阶段一完全相同的特征（features()），按测点所在母线和相别放到图节点上。
@@ -53,6 +55,16 @@ def bus_graph(net, kn):
     lap = np.eye(n) - adj / np.sqrt(np.outer(d, d))
     lam_max = np.linalg.eigvalsh(lap).max()
     return buses, (2 * lap / lam_max - np.eye(n)).astype(np.float32)
+
+
+def physical_adjacency(net, buses):
+    """母线的物理相邻矩阵（含自环），供图注意力层作注意力掩码。"""
+    idx = {b: i for i, b in enumerate(buses)}
+    a = np.eye(len(buses), dtype=np.float32)
+    for u, nbrs in net.adj.items():
+        for v, _ in nbrs:
+            a[idx[u], idx[v]] = a[idx[v], idx[u]] = 1.0
+    return a
 
 
 def sensor_slots(net, buses, sensors):
@@ -127,12 +139,31 @@ class ChebLayer(nn.Module):
         return self.lin(torch.cat(t[: self.k], -1))
 
 
+class GATLayer(nn.Module):
+    """多头图注意力层：各头输出拼接。"""
+
+    def __init__(self, n_in, n_out, heads=4):
+        super().__init__()
+        self.h, self.f = heads, n_out // heads
+        self.lin = nn.Linear(n_in, heads * self.f, bias=False)
+        self.a_src = nn.Parameter(torch.randn(heads, self.f) * 0.1)
+        self.a_dst = nn.Parameter(torch.randn(heads, self.f) * 0.1)
+
+    def forward(self, x, adj):
+        h = self.lin(x).view(x.shape[0], x.shape[1], self.h, self.f)               # (B, N, H, F)
+        e = nn.functional.leaky_relu((h * self.a_src).sum(-1)[:, :, None, :] + (h * self.a_dst).sum(-1)[:, None, :, :], 0.2)   # (B, N, N, H)
+        e = e.masked_fill(adj[None, :, :, None] == 0, float("-inf"))
+        att = torch.softmax(e, dim=2)
+        return torch.einsum("bijh,bjhf->bihf", att, h).reshape(x.shape[0], x.shape[1], self.h * self.f)
+
+
 class GCN(nn.Module):
-    def __init__(self, lap, n_in, n_classes, filters, hidden=(512, 256)):
+    def __init__(self, lap, n_in, n_classes, filters, hidden=(512, 256), arch="cheb"):
         super().__init__()
         self.register_buffer("lap", torch.from_numpy(lap))
         dims = (n_in,) + (filters,) * len(CONV_K)
-        self.conv = nn.ModuleList(ChebLayer(dims[i], dims[i + 1], k) for i, k in enumerate(CONV_K))
+        self.conv = nn.ModuleList(ChebLayer(dims[i], dims[i + 1], k) for i, k in enumerate(CONV_K) ) if arch == "cheb" else nn.ModuleList(
+            GATLayer(dims[i], dims[i + 1]) for i in range(len(CONV_K)))
         n = lap.shape[0] * filters
         self.fc = nn.Sequential(
             nn.Dropout(0.5), nn.Linear(n, hidden[0]), nn.ReLU(),
@@ -140,15 +171,15 @@ class GCN(nn.Module):
 
     def forward(self, x):
         for layer in self.conv:
-            x = torch.relu(layer(x, self.lap))
+            x = torch.relu(layer(x, self.lap)) if isinstance(layer, ChebLayer) else nn.functional.elu(layer(x, self.lap))
         return self.fc(x.flatten(1))
 
 
-def train_gcn(builder, lap, train, n_classes, filters, steps, batch, lr, seed=0):
+def train_gcn(builder, lap, train, n_classes, filters, steps, batch, lr, seed=0, arch="cheb"):
     torch.manual_seed(seed)
     torch.set_num_threads(1)
     rng = np.random.default_rng(seed)
-    model = GCN(lap, builder.nf, n_classes, filters)
+    model = GCN(lap, builder.nf, n_classes, filters, arch=arch)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps)
     loss_fn = nn.CrossEntropyLoss()
@@ -216,6 +247,7 @@ def main():
     ap.add_argument("--train-extra", nargs="+", default=[], help="并入训练集的其他数据集文件名（不同线路阻抗倍率下的数据，需含故障前相量）")
     ap.add_argument("--seed", type=int, default=0, help="训练的随机种子")
     ap.add_argument("--noise-levels", action="store_true", help="并入 NOISE_LEVELS 中的噪声档位场景")
+    ap.add_argument("--arch", choices=["cheb", "gat"], default="cheb", help="图层：切比雪夫卷积（GCN）或多头图注意力（GAT）")
     ap.add_argument("--save-samples", type=Path, help="保存各场景的逐样本预测区段（npz，键为 模式/场景/sec）")
     ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34")
     ap.add_argument("--prepare", nargs=2, type=Path, metavar=("SRC", "DST"), help="从含 v0、i0 的数据集提取测点量测行")
@@ -230,6 +262,8 @@ def main():
         return
     sigma = net.measurement_sigma(rows)
     buses, lap = bus_graph(net, a.kn)
+    if a.arch == "gat":
+        lap = physical_adjacency(net, buses)
     print(f"图：{len(buses)} 个母线，Kn={a.kn}", flush=True)
     train = load_raw(fp("train_gcn.npz" if a.case == "ieee34" else "train.npz"), rows)
     for name in a.train_extra:
@@ -243,7 +277,7 @@ def main():
     samples = {}
     for mode in a.modes:
         builder = InputBuilder(net, buses, case["sensors"], mode, sigma, train, np.random.default_rng(1))
-        model = train_gcn(builder, lap, train, n_sec, a.filters, a.steps, a.batch, a.lr, a.seed)
+        model = train_gcn(builder, lap, train, n_sec, a.filters, a.steps, a.batch, a.lr, a.seed, a.arch)
         res = {}
         # 等价类来自 evaluate_pipeline.py；仅 --val-only 调参时允许缺省
         cls = np.array(json.loads(eval_json.read_text())["equivalence_classes"]) if eval_json.exists() else None
