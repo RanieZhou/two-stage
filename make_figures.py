@@ -31,7 +31,7 @@ COL = {"本方案": "#2a78d6", "GCN": "#eb6834", "GAT": "#1baf7a", "块稀疏贝
 MK = {"本方案": "o", "GCN": "s", "GAT": "^", "块稀疏贝叶斯": "D", "PCA+SVM": "v", "PCA+随机森林": "P", "神经网络 Top-1": "x", "物理穷举": "+"}
 EN = {"本方案": "Ours", "GCN": "GCN", "GAT": "GAT", "块稀疏贝叶斯": "Block-sparse Bayesian", "PCA+SVM": "PCA+SVM", "PCA+随机森林": "PCA+RF",
       "神经网络 Top-1": "Neural network Top-1", "物理穷举": "Exhaustive physics"}
-name = lambda k: k if zh else EN[k]
+name = lambda k: ("本方法" if k == "本方案" else k) if zh else EN[k]
 plt.rcParams.update({
     "font.family": "sans-serif", "font.sans-serif": ["WenQuanYi Zen Hei", "DejaVu Sans"] if zh else ["DejaVu Sans"],
     "axes.unicode_minus": False, "axes.edgecolor": INK2, "axes.labelcolor": INK, "xtick.color": INK2, "ytick.color": INK2, "text.color": INK,
@@ -141,20 +141,23 @@ def fig3():
     ax.axvline(3.5, color=INK2, lw=0.8, ls=":")
     ax.text(3.6, 52, T("训练范围外", "beyond training"), fontsize=7, color=INK2)
     ax.text(3.4, 52, T("训练范围内", "within training"), fontsize=7, color=INK2, ha="right")
-    ax.set_xticks(xs); ax.set_xticklabels([b.replace("Rf ", "").replace(" Ω", "") for b in bins], fontsize=7)
+    ax.set_xticks(xs); ax.set_xticklabels([b.replace("Rf ", "").replace(" Ω", "") for b in bins], fontsize=6.3)
     ax.set_xlabel(T("过渡电阻 (Ω)", "Fault resistance (Ω)")); ax.set_ylabel(T("类准确率 (%)", "Class accuracy (%)"))
     ax.set_ylim(50, 100); ax.set_title("(a)", loc="left", fontsize=9)
     ax.legend(fontsize=7, loc="lower left")
     ax = axes[1]
     levels = [0.5, 1, 2, 3, 5]
-    series = {"本方案": "本方案", "GCN": best_input(t1, "GCN", None), "GAT": best_input(t1, "GAT", None), "块稀疏贝叶斯": "块稀疏贝叶斯学习", "PCA+SVM": "PCA+SVM", "PCA+随机森林": "PCA+随机森林"}
-    for mk, key in series.items():
+    # 块稀疏贝叶斯学习从 ×3 起低于 50%，不画（见正文）；GCN、GAT 的两种输入都画：论文输入实线，突变量输入虚线
+    series = [("本方案", "本方案", "-"), ("GCN", "GCN 论文输入", "-"), ("GCN", "GCN 突变量输入", "--"), ("GAT", "GAT 论文输入", "-"), ("GAT", "GAT 突变量输入", "--"),
+              ("PCA+SVM", "PCA+SVM", "-"), ("PCA+随机森林", "PCA+随机森林", "-")]
+    for mk, key, ls in series:
         ys = [t1[f"噪声 ×{l:g}"][key]["class_acc"] * 100 for l in levels]
-        lab = name(mk) + ("" if mk in ("本方案", "块稀疏贝叶斯", "PCA+SVM", "PCA+随机森林") else f" ({key.split(' ')[1][:2] if zh else ('paper' if '论文' in key else 'disturbance')})")
-        ax.plot(range(len(levels)), ys, color=COL[mk], marker=MK[mk], ms=5, lw=1.8 if mk == "本方案" else 1.2, label=lab)
+        tag = "" if mk in ("本方案", "PCA+SVM", "PCA+随机森林") else (T(" 论文输入", " paper input") if "论文" in key else T(" 突变量输入", " disturbance input"))
+        ax.plot(range(len(levels)), ys, color=COL[mk], marker=MK[mk], ms=4.5, lw=1.9 if mk == "本方案" else 1.2, ls=ls, label=name(mk) + tag, mfc="none" if ls == "--" else COL[mk])
     ax.set_xticks(range(len(levels))); ax.set_xticklabels([f"×{l:g}" for l in levels])
+    ax.set_ylim(72, 100)
     ax.set_xlabel(T("量测噪声倍数", "Measurement noise multiplier")); ax.set_title("(b)", loc="left", fontsize=9)
-    ax.legend(fontsize=6.5, loc="lower left", ncol=1)
+    ax.legend(fontsize=6.3, loc="lower left", ncol=1)
     save(fig, 3)
 
 

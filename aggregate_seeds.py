@@ -33,6 +33,27 @@ for case in ("ieee34", "ieee123"):
             vals = [g[sc]["class_acc"] for g in gcn[m] if sc in g]
             if vals:
                 out[sc][name] = stat(vals)
+    # GAT（论文输入、突变量输入）、PCA+SVM、PCA+随机森林：种子 0 为主结果，其余在 seeds/；块稀疏贝叶斯无随机性，单次
+    extra = {"GAT(论文输入)": ("gat_paper", "gcn"), "GAT(突变量输入)": ("gat_delta", "gcn_delta")}
+    for name, (stem, mode) in extra.items():
+        files = [root / f"{stem}.json"] + sorted((root / "seeds").glob(f"{stem}_s*.json"))
+        runs = [json.load(open(f))[mode] for f in files if f.exists()]
+        for sc, o in out.items():
+            vals = [r[sc]["class_acc"] for r in runs if sc in r]
+            if vals:
+                o[name] = stat(vals)
+    for name, m in (("PCA+SVM", "pca_svm"), ("PCA+随机森林", "pca_rf")):
+        files = [root / "baselines_ml.json"] + sorted((root / "seeds").glob("pca_s*.json"))
+        runs = [json.load(open(f))[m] for f in files if f.exists()]
+        for sc, o in out.items():
+            vals = [r[sc]["class_acc"] for r in runs if sc in r]
+            if vals:
+                o[name] = stat(vals)
+    if (root / "baselines_bsbl.json").exists():
+        bs = json.load(open(root / "baselines_bsbl.json"))
+        for sc, o in out.items():
+            if sc in bs:
+                o["块稀疏贝叶斯"] = stat([bs[sc]["class_acc"]])
     (root / "multi_seed.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
     print(case, "种子数", {k: v["n"] for k, v in next(iter(out.values())).items()})
     for sc, o in out.items():
