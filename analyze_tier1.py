@@ -3,7 +3,7 @@
 输入（均为 IEEE 34，种子 0）：
   results/improved/ieee34/samples.npz                 本方案、硬串联（神经网络 Top-1 + 物理定位）、物理穷举的逐样本结果（evaluate_pipeline.py --save-samples）
   results/improved/ieee34/stage1_swap/<名>/samples.npz 外部分类器作阶段一时的逐样本结果：硬串联 = 外部分类器 Top-1 + 物理定位
-  results/improved/ieee34/baselines_gcn_samples.npz、baselines_ml_samples.npz、baselines_ml_extra_samples.npz  外部分类器自身的逐样本预测区段
+  results/improved/ieee34/baselines_{gcn,gat,ml}_samples.npz  外部分类器自身的逐样本预测区段；baselines_bsbl_samples.npz  块稀疏贝叶斯学习的区段与测距误差
 外部分类器只输出区段，“区段中点”为取预测区段中点的测距误差，“+物理定位”为其 Top-1 区段接本方案阶段二的测距误差。
 """
 import json
@@ -18,11 +18,10 @@ R = Path("results/improved/ieee34")
 cls = np.array(json.load(open(R / "evaluation.json"))["equivalence_classes"])
 net = Network(case=CASES["ieee34"])
 ours = np.load(R / "samples.npz")
-gcn = np.load(R / "baselines_gcn_samples.npz")
-ml = {k: z[k] for f in ("baselines_ml_samples.npz", "baselines_ml_extra_samples.npz") for z in [np.load(R / f)] for k in z.files}
+gcn, gat, ml, bsbl = (np.load(R / f"baselines_{n}_samples.npz") for n in ("gcn", "gat", "ml", "bsbl"))
 EXT = {"GCN 论文输入": ("gcn_paper", gcn, "gcn/{}/sec"), "GCN 突变量输入": ("gcn_delta", gcn, "gcn_delta/{}/sec"),
-       "SVM": ("svm", ml, "svm/{}/sec"), "随机森林": ("rf", ml, "rf/{}/sec"), "GBDT": ("gbdt", ml, "gbdt/{}/sec"),
-       "1D-CNN": ("cnn", ml, "cnn/{}/sec"), "kNN 库匹配": ("knn", ml, "knn/{}/sec")}
+       "GAT 论文输入": ("gat_paper", gat, "gcn/{}/sec"), "GAT 突变量输入": ("gat_delta", gat, "gcn_delta/{}/sec"),
+       "PCA+SVM": ("pca_svm", ml, "pca_svm/{}/sec"), "PCA+随机森林": ("pca_rf", ml, "pca_rf/{}/sec")}
 swap = {name: np.load(R / "stage1_swap" / tag / "samples.npz") for name, (tag, _, _) in EXT.items()}
 type_name = np.array([n for n, _ in FAULT_TYPES])
 mid = lambda sec: np.array([net.fault_distance_km(s, 0.5) for s in sec])
@@ -40,6 +39,7 @@ def method_stats(scs, mask_of):
         for name, (tag, src, key) in EXT.items():
             sec = src[key.format(sc)][:len(m)][m]   # 外部分类器的评测不截取，取与本方案相同的前若干个样本
             rec[name] = (sec, swap[name][f"{sc}/硬串联/d_err"][m], np.abs(mid(sec) - d_true))
+        rec["块稀疏贝叶斯学习"] = (bsbl[f"bsbl/{sc}/sec"][:len(m)][m], bsbl[f"bsbl/{sc}/d_err"][:len(m)][m], None)
         for k, (sec, d_phys, d_mid) in rec.items():
             p = parts.setdefault(k, dict(t=[], sec=[], dp=[], dm=[]))
             p["t"].append(t); p["sec"].append(sec); p["dp"].append(d_phys); p["dm"].append(d_mid)
