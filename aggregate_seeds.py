@@ -1,6 +1,6 @@
 """汇总多随机种子的结果：每个场景给出各方法类别准确率与本方案测距误差的均值与标准差（ddof=1）。
 
-种子 0 为 results/improved/<case>/ 下的主结果，其余种子在 seeds/ 下；种子只改变各神经网络的初始化与小批量抽样，测试样本相同。
+种子 0 为 results/improved/<case>/ 下的主结果，其余种子在 seeds/ 下（IEEE 123 的 GCN 在种子 0 时未运行三个模型偏差场景，这些场景只含种子 1 起的结果）；种子只改变各神经网络的初始化与小批量抽样，测试样本相同。
 """
 import json
 from pathlib import Path
@@ -30,8 +30,9 @@ for case in ("ieee34", "ieee123"):
             "本方案测距误差均值km": stat([r[sc][OURS]["d_mean"] for r in ours]),
         }
         for name, m in (("GCN(论文输入)", "gcn"), ("GCN(突变量输入)", "gcn_delta")):
-            if sc in gcn[m][0]:
-                out[sc][name] = stat([g[sc]["class_acc"] for g in gcn[m]])
+            vals = [g[sc]["class_acc"] for g in gcn[m] if sc in g]
+            if vals:
+                out[sc][name] = stat(vals)
     (root / "multi_seed.json").write_text(json.dumps(out, ensure_ascii=False, indent=1))
     print(case, "种子数", {k: v["n"] for k, v in next(iter(out.values())).items()})
     for sc, o in out.items():

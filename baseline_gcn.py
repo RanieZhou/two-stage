@@ -167,14 +167,15 @@ def train_gcn(builder, lap, train, n_classes, filters, steps, batch, lr, seed=0)
 
 
 @torch.no_grad()
-def predict(model, builder, d, noise_scale, seed):
-    """对整个数据集（d["zc"] 为无噪量测）加噪后预测区段，噪声种子与评测脚本一致。"""
+def predict(model, builder, d, noise_scale, seed, probs=False):
+    """对整个数据集（d["zc"] 为无噪量测）加噪后预测区段（probs 为真时返回区段概率），噪声种子与评测脚本一致。"""
     rng = np.random.default_rng(seed)
     out = []
     for lo in range(0, len(d["sec"]), 2000):
         i = np.arange(lo, min(lo + 2000, len(d["sec"])))
         x = builder.standardize(builder.build(*builder.noisy(d, rng, i, noise_scale)))
-        out.append(model(torch.from_numpy(x)).argmax(1).numpy())
+        logits = model(torch.from_numpy(x))
+        out.append(torch.softmax(logits, 1).numpy() if probs else logits.argmax(1).numpy())
     return np.concatenate(out)
 
 
@@ -211,7 +212,7 @@ def main():
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--modes", nargs="+", default=["gcn", "gcn_delta"])
     ap.add_argument("--val-only", action="store_true", help="只在验证集上评估，用于选择超参数")
-    ap.add_argument("--export-probs", type=Path, help="gcn_delta 模式：导出验证集（val、val_gcn）与各场景（与评测脚本相同的带噪观测）上的区段概率")
+    ap.add_argument("--export-probs", type=Path, help="导出验证集（val、val_gcn）与各场景上的区段概率，需单个 --modes。gcn_delta 用与评测脚本相同的带噪观测；gcn 用自身输入（故障期间相量）加噪")
     ap.add_argument("--train-extra", nargs="+", default=[], help="并入训练集的其他数据集文件名（不同线路阻抗倍率下的数据，需含故障前相量）")
     ap.add_argument("--seed", type=int, default=0, help="训练的随机种子")
     ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34")
@@ -276,6 +277,13 @@ def main():
             if a.case == "ieee34":   # 带故障前相量的验证集，供非线性精化标定
                 d = load_raw(fp("val_gcn.npz"), rows)
                 probs["val_gcn"] = predict_probs(model, builder, add_measurement_noise(np.random.default_rng(101), d["zc"], sigma))
+            np.savez_compressed(a.export_probs, **probs)
+        if a.export_probs and mode == "gcn":
+            assert len(a.modes) == 1, "导出区段概率时只能指定一个模式"
+            probs = {"val": predict(model, builder, load_raw(fp("val_gcn.npz" if a.case == "ieee34" else "val.npz"), rows), 1.0, seed=101, probs=True)}
+            for name, (fn, noise_scale) in SCENARIOS.items():
+                if fp(fn).exists():
+                    probs[name] = predict(model, builder, load_raw(fp(fn), rows), noise_scale, seed=202, probs=True)
             np.savez_compressed(a.export_probs, **probs)
     if not a.val_only:
         a.out.write_text(json.dumps(results, ensure_ascii=False, indent=1))
