@@ -1,0 +1,61 @@
+{
+ "kn": 12,
+ "filters": 128,
+ "steps": 8000,
+ "gcn": {
+  "域内": {
+   "section_acc": 0.6546,
+   "class_acc": 0.8224,
+   "d_mean_midpoint": 0.07708496735317921,
+   "d_mean_oracle_section_midpoint": 0.029928974479938166
+  },
+  "负荷偏移": {
+   "section_acc": 0.55,
+   "class_acc": 0.7086,
+   "d_mean_midpoint": 0.1539585661688154,
+   "d_mean_oracle_section_midpoint": 0.029967846869676237
+  },
+  "高阻外推": {
+   "section_acc": 0.096,
+   "class_acc": 0.154,
+   "d_mean_midpoint": 0.5958447691025868,
+   "d_mean_oracle_section_midpoint": 0.02996267633400219
+  },
+  "噪声×3": {
+   "section_acc": 0.5514,
+   "class_acc": 0.7124,
+   "d_mean_midpoint": 0.1288511419445716,
+   "d_mean_oracle_section_midpoint": 0.029928974479938166
+  },
+  "线路阻抗+10%": {
+   "section_acc": 0.6558,
+   "class_acc": 0.8246,
+   "d_mean_midpoint": 0.07438797979529087,
+   "d_mean_oracle_section_midpoint": 0.029691365745967344
+  },
+  "线路阻抗-10%": {
+   "section_acc": 0.6438,
+   "class_acc": 0.812,
+   "d_mean_midpoint": 0.08078208566936608,
+   "d_mean_oracle_section_midpoint": 0.029744767281202747
+  },
+  "个别线路阻抗±20%": {
+   "section_acc": 0.625,
+   "class_acc": 0.8018,
+   "d_mean_midpoint": 0.0792849220150385,
+   "d_mean_oracle_section_midpoint": 0.029628223441825436
+  },
+  "各负荷独立变化": {
+   "section_acc": 0.6308,
+   "class_acc": 0.794,
+   "d_mean_midpoint": 0.09438338070216162,
+   "d_mean_oracle_section_midpoint": 0.029393907776654623
+  },
+  "线路与负荷同时偏差": {
+   "section_acc": 0.598,
+   "class_acc": 0.7628,
+   "d_mean_midpoint": 0.09170411396253797,
+   "d_mean_oracle_section_midpoint": 0.029380084232488866
+  }
+ }
+}
