@@ -1,0 +1,166 @@
+{
+ "pca_svm": {
+  "域内": {
+   "section_acc": 0.8958,
+   "class_acc": 0.9273,
+   "d_mean_midpoint": 2.268101960438073
+  },
+  "负荷偏移": {
+   "section_acc": 0.8501,
+   "class_acc": 0.8814,
+   "d_mean_midpoint": 2.572472898282194
+  },
+  "高阻外推": {
+   "section_acc": 0.4903,
+   "class_acc": 0.5419,
+   "d_mean_midpoint": 7.7090180759466955
+  },
+  "噪声×3": {
+   "section_acc": 0.8365,
+   "class_acc": 0.8679,
+   "d_mean_midpoint": 2.7373572093906855
+  },
+  "线路阻抗+5%": {
+   "section_acc": 0.8915,
+   "class_acc": 0.9266,
+   "d_mean_midpoint": 2.246014914373473
+  },
+  "线路阻抗+10%": {
+   "section_acc": 0.8709,
+   "class_acc": 0.91,
+   "d_mean_midpoint": 2.298532011664506
+  },
+  "线路阻抗-10%": {
+   "section_acc": 0.8629,
+   "class_acc": 0.8916,
+   "d_mean_midpoint": 2.450875044845149
+  },
+  "个别线路阻抗±20%": {
+   "section_acc": 0.8614,
+   "class_acc": 0.885,
+   "d_mean_midpoint": 2.4453962612769224
+  },
+  "各负荷独立变化": {
+   "section_acc": 0.8958,
+   "class_acc": 0.9244,
+   "d_mean_midpoint": 2.2792079726415913
+  },
+  "线路与负荷同时偏差": {
+   "section_acc": 0.848,
+   "class_acc": 0.8742,
+   "d_mean_midpoint": 2.478926385991981
+  },
+  "固定档位 域内": {
+   "section_acc": 0.872,
+   "class_acc": 0.9076666666666666,
+   "d_mean_midpoint": 2.339286140805074
+  },
+  "固定档位 负荷偏移": {
+   "section_acc": 0.839,
+   "class_acc": 0.8686666666666667,
+   "d_mean_midpoint": 2.3817135370125277
+  },
+  "固定档位 高阻外推": {
+   "section_acc": 0.4656666666666667,
+   "class_acc": 0.521,
+   "d_mean_midpoint": 7.749453723702638
+  },
+  "固定档位 噪声×3": {
+   "section_acc": 0.817,
+   "class_acc": 0.8513333333333334,
+   "d_mean_midpoint": 2.8666123204261686
+  },
+  "固定档位 阻抗+10%": {
+   "section_acc": 0.845,
+   "class_acc": 0.8876666666666667,
+   "d_mean_midpoint": 2.429624776668336
+  },
+  "固定档位 阻抗-10%": {
+   "section_acc": 0.8756666666666667,
+   "class_acc": 0.9006666666666666,
+   "d_mean_midpoint": 2.398563435683939
+  }
+ },
+ "pca_rf": {
+  "域内": {
+   "section_acc": 0.9016,
+   "class_acc": 0.9322,
+   "d_mean_midpoint": 2.2527538485484997
+  },
+  "负荷偏移": {
+   "section_acc": 0.8333,
+   "class_acc": 0.8651,
+   "d_mean_midpoint": 2.776047749652643
+  },
+  "高阻外推": {
+   "section_acc": 0.3795,
+   "class_acc": 0.4304,
+   "d_mean_midpoint": 9.146343324189372
+  },
+  "噪声×3": {
+   "section_acc": 0.8159,
+   "class_acc": 0.8493,
+   "d_mean_midpoint": 2.9378187208257995
+  },
+  "线路阻抗+5%": {
+   "section_acc": 0.8929,
+   "class_acc": 0.9269,
+   "d_mean_midpoint": 2.2426536244902255
+  },
+  "线路阻抗+10%": {
+   "section_acc": 0.8643,
+   "class_acc": 0.9033,
+   "d_mean_midpoint": 2.316060914661358
+  },
+  "线路阻抗-10%": {
+   "section_acc": 0.8591,
+   "class_acc": 0.8869,
+   "d_mean_midpoint": 2.442770689543654
+  },
+  "个别线路阻抗±20%": {
+   "section_acc": 0.8582,
+   "class_acc": 0.8828,
+   "d_mean_midpoint": 2.435414270170909
+  },
+  "各负荷独立变化": {
+   "section_acc": 0.896,
+   "class_acc": 0.927,
+   "d_mean_midpoint": 2.2850619480325425
+  },
+  "线路与负荷同时偏差": {
+   "section_acc": 0.8456,
+   "class_acc": 0.8726,
+   "d_mean_midpoint": 2.5109919678115005
+  },
+  "固定档位 域内": {
+   "section_acc": 0.873,
+   "class_acc": 0.905,
+   "d_mean_midpoint": 2.3149621779213865
+  },
+  "固定档位 负荷偏移": {
+   "section_acc": 0.851,
+   "class_acc": 0.879,
+   "d_mean_midpoint": 2.4728194030114805
+  },
+  "固定档位 高阻外推": {
+   "section_acc": 0.3546666666666667,
+   "class_acc": 0.4106666666666667,
+   "d_mean_midpoint": 9.09790847027166
+  },
+  "固定档位 噪声×3": {
+   "section_acc": 0.7843333333333333,
+   "class_acc": 0.82,
+   "d_mean_midpoint": 3.0534784333240714
+  },
+  "固定档位 阻抗+10%": {
+   "section_acc": 0.8283333333333334,
+   "class_acc": 0.872,
+   "d_mean_midpoint": 2.540230978198923
+  },
+  "固定档位 阻抗-10%": {
+   "section_acc": 0.863,
+   "class_acc": 0.886,
+   "d_mean_midpoint": 2.5186498280166147
+  }
+ }
+}
