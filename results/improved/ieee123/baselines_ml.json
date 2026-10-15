@@ -1,0 +1,96 @@
+{
+ "pca_svm": {
+  "域内": {
+   "section_acc": 0.4282,
+   "class_acc": 0.7074,
+   "d_mean_midpoint": 0.1185730120111226
+  },
+  "负荷偏移": {
+   "section_acc": 0.4434,
+   "class_acc": 0.719,
+   "d_mean_midpoint": 0.11369029071605637
+  },
+  "高阻外推": {
+   "section_acc": 0.0212,
+   "class_acc": 0.0262,
+   "d_mean_midpoint": 0.9227445615991483
+  },
+  "噪声×3": {
+   "section_acc": 0.3582,
+   "class_acc": 0.6164,
+   "d_mean_midpoint": 0.20382740784991385
+  },
+  "线路阻抗+10%": {
+   "section_acc": 0.4322,
+   "class_acc": 0.7136,
+   "d_mean_midpoint": 0.11876935047837928
+  },
+  "线路阻抗-10%": {
+   "section_acc": 0.4064,
+   "class_acc": 0.6902,
+   "d_mean_midpoint": 0.12694282307114688
+  },
+  "个别线路阻抗±20%": {
+   "section_acc": 0.4374,
+   "class_acc": 0.7146,
+   "d_mean_midpoint": 0.11920705384502639
+  },
+  "各负荷独立变化": {
+   "section_acc": 0.4388,
+   "class_acc": 0.717,
+   "d_mean_midpoint": 0.1179266373060288
+  },
+  "线路与负荷同时偏差": {
+   "section_acc": 0.4244,
+   "class_acc": 0.7086,
+   "d_mean_midpoint": 0.12151051068366543
+  }
+ },
+ "pca_rf": {
+  "域内": {
+   "section_acc": 0.57,
+   "class_acc": 0.8186,
+   "d_mean_midpoint": 0.09145304257305105
+  },
+  "负荷偏移": {
+   "section_acc": 0.5506,
+   "class_acc": 0.8026,
+   "d_mean_midpoint": 0.09060436629753854
+  },
+  "高阻外推": {
+   "section_acc": 0.0834,
+   "class_acc": 0.1228,
+   "d_mean_midpoint": 0.7337053191469846
+  },
+  "噪声×3": {
+   "section_acc": 0.4836,
+   "class_acc": 0.7078,
+   "d_mean_midpoint": 0.16233133290363813
+  },
+  "线路阻抗+10%": {
+   "section_acc": 0.5586,
+   "class_acc": 0.8076,
+   "d_mean_midpoint": 0.09050833131255187
+  },
+  "线路阻抗-10%": {
+   "section_acc": 0.5264,
+   "class_acc": 0.7854,
+   "d_mean_midpoint": 0.09644553351147044
+  },
+  "个别线路阻抗±20%": {
+   "section_acc": 0.556,
+   "class_acc": 0.8042,
+   "d_mean_midpoint": 0.0928041564157255
+  },
+  "各负荷独立变化": {
+   "section_acc": 0.5802,
+   "class_acc": 0.8234,
+   "d_mean_midpoint": 0.0905119602393055
+  },
+  "线路与负荷同时偏差": {
+   "section_acc": 0.54,
+   "class_acc": 0.791,
+   "d_mean_midpoint": 0.09464473380323814
+  }
+ }
+}
