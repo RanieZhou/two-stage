@@ -45,6 +45,24 @@
    "d_mean_midpoint": 2.1845493844776245,
    "d_mean_oracle_section_midpoint": 2.0289137143755203
   },
+  "个别线路阻抗±20%": {
+   "section_acc": 0.8776,
+   "class_acc": 0.9056,
+   "d_mean_midpoint": 2.31963559742914,
+   "d_mean_oracle_section_midpoint": 2.0311673102106504
+  },
+  "各负荷独立变化": {
+   "section_acc": 0.9358,
+   "class_acc": 0.9628,
+   "d_mean_midpoint": 2.150998438472907,
+   "d_mean_oracle_section_midpoint": 2.0299827174979588
+  },
+  "线路与负荷同时偏差": {
+   "section_acc": 0.8676,
+   "class_acc": 0.8946,
+   "d_mean_midpoint": 2.381837340829031,
+   "d_mean_oracle_section_midpoint": 2.0548378719451357
+  },
   "固定档位 域内": {
    "section_acc": 0.905,
    "class_acc": 0.936,

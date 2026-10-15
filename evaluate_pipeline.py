@@ -14,6 +14,8 @@
   fx_in.npz --seed 21 --rf 0.01 300 --mult 0.6 1.1；fx_load.npz --seed 22 --rf 0.01 300 --mult 1.25 1.5；
   fx_rf.npz --seed 23 --rf 300 1000 --mult 0.6 1.1；fx_zp.npz --seed 24 --line-z-scale 1.1；fx_zm.npz --seed 25 --line-z-scale 0.9
   （fx_zp、fx_zm 的 --rf 0.01 300 --mult 0.6 1.1）
+模型偏差场景（各 5000 个）：test_zline.npz --seed 301 --mult 0.6 1.1 --line-z-spread 0.2；test_loadind.npz --seed 302 --mult 1 1 --load-indep 0.6 1.1；
+  test_bias_both.npz --seed 303 --mult 1 1 --line-z-spread 0.2 --load-indep 0.6 1.1（均 --rf 0.01 300）
 阻抗扩增训练集（只存测点行，--sensors）：train_z0.88/0.94/1.06/1.12.npz 各 20000 个，seed 211–214，--rf 0.01 300 --mult 0.6 1.1，
   --line-z-scale 同文件名中的倍率。
 用法（IEEE 34，改进后方案；--classes 沿用改进前评测得到的等价类，使区段指标同口径）：
@@ -73,6 +75,10 @@ SCENARIOS = {
     "线路阻抗+5%": ("test_z105.npz", 1.0),
     "线路阻抗+10%": ("test_zscale.npz", 1.0),
     "线路阻抗-10%": ("test_z090.npz", 1.0),
+    # 模型偏差：各区段线路阻抗独立乘 U(0.8, 1.2)（负荷倍率 0.6–1.1）；各负荷功率独立乘 U(0.6, 1.1)；两者同时
+    "个别线路阻抗±20%": ("test_zline.npz", 1.0),
+    "各负荷独立变化": ("test_loadind.npz", 1.0),
+    "线路与负荷同时偏差": ("test_bias_both.npz", 1.0),
     # 调压器档位固定、网络参数精确已知的场景，满足 L1 的前提；同时运行 L1
     "固定档位 域内": ("fx_in.npz", 1.0),
     "固定档位 负荷偏移": ("fx_load.npz", 1.0),

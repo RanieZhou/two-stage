@@ -80,6 +80,34 @@ class Simulator:
         if line_z_scale != 1.0:
             scale_line_impedance(line_z_scale)
         dss.Command("New Fault.F1 Bus1=800 Phases=1 R=1 enabled=no")
+        # 逐样本随机偏差用：各区段线路（含拆出的后半段）与各负荷的名义值
+        self.line_nominal = {}
+        for s in self.net.sections:
+            for name in (s["name"], s["name"] + "_b"):
+                dss.Lines.Name(name)
+                self.line_nominal[name] = (dss.Lines.RMatrix(), dss.Lines.XMatrix())
+        self.load_nominal = {}
+        for name in dss.Loads.AllNames():
+            dss.Loads.Name(name)
+            self.load_nominal[name] = (dss.Loads.kW(), dss.Loads.kvar())
+
+    def apply_bias(self, bias):
+        """bias = (种子, 线路阻抗偏差幅度, 负荷独立倍率下限, 上限)：各区段线路阻抗各自乘 U(1−x, 1+x)，各负荷功率各自乘 U(下限, 上限)。
+        幅度为 0 或倍率区间为 None 的项不扰动（回到名义值）。"""
+        seed, spread, lo, hi = bias
+        rng = np.random.default_rng(seed)
+        for s in self.net.sections:
+            f = 1.0 + spread * rng.uniform(-1, 1) if spread else 1.0
+            for name in (s["name"], s["name"] + "_b"):
+                dss.Lines.Name(name)
+                r, x = self.line_nominal[name]
+                dss.Lines.RMatrix([v * f for v in r])
+                dss.Lines.XMatrix([v * f for v in x])
+        for name, (kw, kvar) in self.load_nominal.items():
+            f = rng.uniform(lo, hi) if lo is not None else 1.0
+            dss.Loads.Name(name)
+            dss.Loads.kW(kw * f)
+            dss.Loads.kvar(kvar * f)
 
     def _set_alpha(self, line, alpha):
         full = self.base_len[line]
@@ -99,9 +127,11 @@ class Simulator:
             i.append(_complex(dss.CktElement.Currents())[c:])
         return v, np.concatenate(i)
 
-    def run(self, sec, alpha, ftype, rf, load_mult):
+    def run(self, sec, alpha, ftype, rf, load_mult, bias=None):
         """返回 (ΔV, ΔI, 故障电流, 故障前电压, 故障前电流)；未收敛时抛出异常。"""
         line = self.net.sections[sec]["name"]
+        if bias is not None:
+            self.apply_bias(bias)
         dss.Command(f"Set LoadMult={load_mult}")
         dss.Command("Fault.F1.enabled=no")
         if not self.fixed_taps:
@@ -148,6 +178,7 @@ def read_sensor_data(path, rows):
 
 
 _sim = None
+_bias_cfg = None   # (线路阻抗偏差幅度, 负荷独立倍率下限, 上限)，逐样本的随机种子另行给出
 _line_z_scale = 1.0
 _fixed_taps = False
 _case = IEEE34
@@ -164,7 +195,8 @@ def _work(recs):
 
 
 def generate(n, seed, rf_range, mult_range, workers, by_length=True, line_z_scale=1.0, fixed_taps=False, case=IEEE34,
-             rf_uniform=False, alpha_range=(0.02, 0.98)):
+             rf_uniform=False, alpha_range=(0.02, 0.98), bias=None):
+    """bias = (线路阻抗偏差幅度, 负荷独立倍率下限, 上限) 时每个样本各自随机扰动（种子取自独立的随机流，不影响其余字段）。"""
     global _line_z_scale, _fixed_taps, _case
     _case = case
     _line_z_scale = line_z_scale
@@ -172,6 +204,9 @@ def generate(n, seed, rf_range, mult_range, workers, by_length=True, line_z_scal
     net_sections = Network(case=case).sections
     rng = np.random.default_rng(seed)
     recs = sample_records(rng, net_sections, n, rf_range, mult_range, by_length, case["no_fault"], rf_uniform, alpha_range)
+    if bias is not None:
+        seeds = np.random.default_rng(seed + 10 ** 6).integers(0, 2 ** 31, n)
+        recs = [r + ((int(sd),) + tuple(bias),) for r, sd in zip(recs, seeds)]
     chunks = [recs[i:i + 64] for i in range(0, n, 64)]
     with Pool(workers) as pool:
         flat = [x for chunk in pool.map(_work, chunks) for x in chunk]
@@ -199,11 +234,14 @@ if __name__ == "__main__":
     ap.add_argument("--fixed-taps", action="store_true", help="调压器档位固定在名义负荷下的位置")
     ap.add_argument("--line-z-scale", type=float, default=1.0, help="仿真线路串联阻抗相对建模参数的倍数")
     ap.add_argument("--uniform-sections", action="store_true", help="各区段等概率而非按长度加权")
+    ap.add_argument("--line-z-spread", type=float, default=0.0, help="逐样本各区段线路阻抗独立乘 U(1−x, 1+x)")
+    ap.add_argument("--load-indep", type=float, nargs=2, metavar=("LO", "HI"), help="逐样本各负荷功率独立乘 U(LO, HI)（此时全网倍率 --mult 应取 1 1）")
     ap.add_argument("--sensors", action="store_true", help="只保存该算例测点行上的突变量 zc 与故障前相量 pre（大系统用，省空间）")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     a.out = a.out.resolve()  # OpenDSS 编译会切换工作目录
-    data = generate(a.n, a.seed, a.rf, a.mult, a.workers, not a.uniform_sections, a.line_z_scale, a.fixed_taps, CASES[a.case], a.rf_uniform, tuple(a.alpha))
+    data = generate(a.n, a.seed, a.rf, a.mult, a.workers, not a.uniform_sections, a.line_z_scale, a.fixed_taps, CASES[a.case], a.rf_uniform, tuple(a.alpha),
+                    bias=(a.line_z_spread, *(a.load_indep or (None, None))) if (a.line_z_spread or a.load_indep) else None)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     if a.sensors:
         rows = Network(case=CASES[a.case]).sensor_rows(CASES[a.case]["sensors"])
