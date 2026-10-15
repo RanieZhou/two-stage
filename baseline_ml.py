@@ -32,6 +32,7 @@ ap.add_argument("--draws", type=int, default=2, help="每个训练样本叠加�
 ap.add_argument("--svm-train", type=int, default=30000)
 ap.add_argument("--trees", type=int, default=150)
 ap.add_argument("--noise-levels", action="store_true")
+ap.add_argument("--probs-suffix", default="", help="区段概率文件名后缀（多种子时避免覆盖主结果）")
 ap.add_argument("--seed", type=int, default=0)
 ap.add_argument("--out", type=Path, required=True, help="结果 json；逐样本区段预测另存为同名 _samples.npz，区段概率存为 data/generated/<前缀>ml_<模型>_probs.npz")
 a = ap.parse_args()
@@ -67,7 +68,11 @@ n_sec = len(net.sections)
 results, samples = {}, {}
 for model in a.models:
     t0 = time.time()
-    if model == "pca_svm":
+    cache = a.data / f"{pre}ml_{model}{a.probs_suffix}_probs.npz"
+    done = np.load(cache) if cache.exists() else None   # 已训练完成并导出过概率的模型直接读取，只重算统计
+    if done is not None:
+        proba = None
+    elif model == "pca_svm":
         idx = np.random.default_rng(a.seed).choice(len(r_tr), min(a.svm_train, len(r_tr)), replace=False)
         clf = SVC(kernel="rbf", C=10.0, gamma="scale", decision_function_shape="ovr").fit(r_tr[idx], y_tr[idx])
 
@@ -86,10 +91,10 @@ for model in a.models:
             out = np.zeros((len(x), n_sec))
             out[:, clf.classes_] = clf.predict_proba(reduce(x))
             return out
-    print(model, f"训练 {time.time() - t0:.0f}s", flush=True)
-    res, probs = {}, {"val": proba(x_val)}
+    print(model, "读取已有概率" if done is not None else f"训练 {time.time() - t0:.0f}s", flush=True)
+    res, probs = {}, ({"val": proba(x_val)} if done is None else {})
     for n, d in sets.items():
-        p = proba(x_sets[n])
+        p = proba(x_sets[n]) if done is None else done[n]
         probs[n] = p
         sec = p.argmax(1)
         d_pred = np.array([net.fault_distance_km(s, 0.5) for s in sec])
@@ -98,6 +103,7 @@ for model in a.models:
         samples[f"{model}/{n}/sec"] = sec
         print(model, n, json.dumps(res[n], ensure_ascii=False), flush=True)
     results[model] = res
-    np.savez_compressed(a.data / f"{pre}ml_{model}_probs.npz", **probs)
+    if done is None:
+        np.savez_compressed(cache, **probs)
 a.out.write_text(json.dumps(results, ensure_ascii=False, indent=1))
 np.savez_compressed(a.out.with_name(a.out.stem + "_samples.npz"), **samples)

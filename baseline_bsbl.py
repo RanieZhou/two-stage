@@ -80,8 +80,12 @@ def bsbl(z):
 
 scen = {**SCENARIOS, **(NOISE_LEVELS if a.noise_levels else {})}
 results, samples = {}, {}
+samples_path = a.out.with_name(a.out.stem + "_samples.npz")
+if a.out.exists() and samples_path.exists():   # 断点续跑：读取已完成场景
+    results = json.loads(a.out.read_text())
+    samples = {k: v for k, v in np.load(samples_path).items()}
 for name, (fn, ns) in scen.items():
-    if not fp(fn).exists():
+    if not fp(fn).exists() or name in results:
         continue
     ds = load_set(fp(fn), net, rows, sigma, seed=202, noise_scale=ns, limit=a.limit)
     blk = np.concatenate([bsbl(ds["z"][i:i + a.chunk]) for i in range(0, len(ds["z"]), a.chunk)])
@@ -91,5 +95,5 @@ for name, (fn, ns) in scen.items():
                          d_median=float(np.median(d_err)))
     samples[f"bsbl/{name}/sec"], samples[f"bsbl/{name}/d_err"] = sec, d_err
     print(name, json.dumps(results[name], ensure_ascii=False), flush=True)
-a.out.write_text(json.dumps(results, ensure_ascii=False, indent=1))
-np.savez_compressed(a.out.with_name(a.out.stem + "_samples.npz"), **samples)
+    a.out.write_text(json.dumps(results, ensure_ascii=False, indent=1))
+    np.savez_compressed(samples_path, **samples)
