@@ -1,9 +1,14 @@
-"""经典机器学习基线：SVM（RBF 核）、随机森林、梯度提升树（GBDT）。
+"""机器学习基线：SVM（RBF 核）、随机森林、梯度提升树（GBDT）、k 近邻库匹配（knn）、一维 CNN（cnn）。
 
 输入与本方案阶段一相同的特征（features：各量测除以幅值最大的量测的实部与虚部、对数信噪比），训练集相同（含阻抗扩增样本）并逐样本叠加量测噪声。
 只输出故障区段，故障点取预测区段的中点。区段概率可导出，供 evaluate_pipeline.py --stage1-probs 作阶段一。
 SVM 训练样本数受核方法的计算量限制，取训练集的随机子样本（--svm-train）；决策函数经单一温度标定为概率（用于阶段一导出）。
+knn：对标准化特征做 k 近邻（k=10，距离加权），相当于与带噪仿真指纹库的相似度匹配；cnn：把特征排成 (实部, 虚部, 对数信噪比) 三个通道、沿量测方向做一维卷积，
+每个批次重新叠加噪声（训练方式与阶段一、GCN 相同）。
 """
+import torch
+from sklearn.neighbors import KNeighborsClassifier
+from torch import nn
 import argparse
 import json
 import time
@@ -30,6 +35,7 @@ ap.add_argument("--draws", type=int, default=2, help="每个训练样本叠加�
 ap.add_argument("--svm-train", type=int, default=30000)
 ap.add_argument("--trees", type=int, default=150)
 ap.add_argument("--boost-iter", type=int, default=150)
+ap.add_argument("--cnn-steps", type=int, default=6000)
 ap.add_argument("--noise-levels", action="store_true")
 ap.add_argument("--seed", type=int, default=0)
 ap.add_argument("--out", type=Path, required=True, help="结果 json；逐样本区段预测与区段概率另存为同名 _samples.npz、各模型 data/generated/<前缀>ml_<模型>_probs.npz")
@@ -83,6 +89,36 @@ for model in a.models:
         sv = score(x_val[:5000])
         temp = minimize_scalar(lambda t: -np.log(softmax(sv * np.exp(t), 1)[np.arange(5000), val["sec"][:5000]] + 1e-12).mean(), bounds=(-3, 6), method="bounded").x
         proba = lambda x: softmax(score(x) * np.exp(temp), 1)
+    elif model == "cnn":
+        m_q = len(sigma)
+        net_cnn = nn.Sequential(
+            nn.Conv1d(3, 32, 3, padding=1), nn.ReLU(), nn.Conv1d(32, 64, 3, padding=1), nn.ReLU(), nn.Conv1d(64, 128, 3, padding=1), nn.ReLU(),
+            nn.Flatten(), nn.Dropout(0.3), nn.Linear(128 * m_q, 256), nn.ReLU(), nn.Linear(256, n_sec))
+        torch.manual_seed(a.seed)
+        torch.set_num_threads(1)
+        opt = torch.optim.AdamW(net_cnn.parameters(), lr=1e-3, weight_decay=1e-4)
+        sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=1e-3, total_steps=a.cnn_steps)
+        zc_all = tr["zc"]
+
+        def to_tensor(x):   # (N, 3m+1) -> (N, 3, m)：实部、虚部、对数信噪比
+            return torch.from_numpy(x[:, :3 * m_q].reshape(len(x), 3, m_q).copy())
+
+        for step in range(a.cnn_steps):
+            i = rng.integers(0, len(zc_all), 256)
+            x = features(add_measurement_noise(rng, zc_all[i], sigma), sigma)
+            loss = nn.functional.cross_entropy(net_cnn(to_tensor(x)), torch.from_numpy(tr["sec"][i].astype(np.int64)))
+            opt.zero_grad(); loss.backward(); opt.step(); sched.step()
+            if step % 1000 == 0:
+                print("cnn step", step, f"loss {loss.item():.4f}", flush=True)
+        net_cnn.eval()
+
+        @torch.no_grad()
+        def proba(x):
+            return torch.cat([torch.softmax(net_cnn(to_tensor(x[lo:lo + 4000])), 1) for lo in range(0, len(x), 4000)]).numpy()
+    elif model == "knn":
+        scaler = StandardScaler().fit(x_tr)
+        clf = KNeighborsClassifier(n_neighbors=10, weights="distance", n_jobs=4).fit(scaler.transform(x_tr), y_tr)
+        proba = lambda x: full_proba(clf, scaler.transform(x))
     else:
         clf = (RandomForestClassifier(n_estimators=a.trees, min_samples_leaf=3, n_jobs=4, random_state=a.seed) if model == "rf"
                else HistGradientBoostingClassifier(max_iter=a.boost_iter, learning_rate=0.1, early_stopping=False, random_state=a.seed)).fit(x_tr, y_tr)

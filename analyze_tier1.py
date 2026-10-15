@@ -3,7 +3,7 @@
 输入（均为 IEEE 34，种子 0）：
   results/improved/ieee34/samples.npz                 本方案、硬串联（神经网络 Top-1 + 物理定位）、物理穷举的逐样本结果（evaluate_pipeline.py --save-samples）
   results/improved/ieee34/stage1_swap/<名>/samples.npz 外部分类器作阶段一时的逐样本结果：硬串联 = 外部分类器 Top-1 + 物理定位
-  results/improved/ieee34/baselines_gcn_samples.npz、baselines_ml_samples.npz  外部分类器自身的逐样本预测区段
+  results/improved/ieee34/baselines_gcn_samples.npz、baselines_ml_samples.npz、baselines_ml_extra_samples.npz  外部分类器自身的逐样本预测区段
 外部分类器只输出区段，“区段中点”为取预测区段中点的测距误差，“+物理定位”为其 Top-1 区段接本方案阶段二的测距误差。
 """
 import json
@@ -18,9 +18,11 @@ R = Path("results/improved/ieee34")
 cls = np.array(json.load(open(R / "evaluation.json"))["equivalence_classes"])
 net = Network(case=CASES["ieee34"])
 ours = np.load(R / "samples.npz")
-gcn, ml = np.load(R / "baselines_gcn_samples.npz"), np.load(R / "baselines_ml_samples.npz")
+gcn = np.load(R / "baselines_gcn_samples.npz")
+ml = {k: z[k] for f in ("baselines_ml_samples.npz", "baselines_ml_extra_samples.npz") for z in [np.load(R / f)] for k in z.files}
 EXT = {"GCN 论文输入": ("gcn_paper", gcn, "gcn/{}/sec"), "GCN 突变量输入": ("gcn_delta", gcn, "gcn_delta/{}/sec"),
-       "SVM": ("svm", ml, "svm/{}/sec"), "随机森林": ("rf", ml, "rf/{}/sec"), "GBDT": ("gbdt", ml, "gbdt/{}/sec")}
+       "SVM": ("svm", ml, "svm/{}/sec"), "随机森林": ("rf", ml, "rf/{}/sec"), "GBDT": ("gbdt", ml, "gbdt/{}/sec"),
+       "1D-CNN": ("cnn", ml, "cnn/{}/sec"), "kNN 库匹配": ("knn", ml, "knn/{}/sec")}
 swap = {name: np.load(R / "stage1_swap" / tag / "samples.npz") for name, (tag, _, _) in EXT.items()}
 type_name = np.array([n for n, _ in FAULT_TYPES])
 mid = lambda sec: np.array([net.fault_distance_km(s, 0.5) for s in sec])
