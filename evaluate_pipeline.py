@@ -88,6 +88,8 @@ SCENARIOS = {
     "固定档位 阻抗-10%": ("fx_zm.npz", 1.0),
 }
 L1_PREFIX = "固定档位"
+# 量测噪声档位（域内测试集，噪声 ×1 即“域内”、×3 即“噪声×3”）；加 --noise-levels 时并入评测
+NOISE_LEVELS = {f"噪声×{m:g}": ("test_in.npz", m) for m in (0.5, 2.0, 5.0)}
 
 
 def load_set(path, net, rows, sigma, seed, noise_scale=1.0, limit=0):
@@ -249,6 +251,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0, help="阶段一训练的随机种子（初始化与批次采样）")
     ap.add_argument("--no-l1", action="store_true", help="不运行 L1（多种子评测时 L1 与种子无关）")
     ap.add_argument("--no-timing", action="store_true", help="不测推断耗时")
+    ap.add_argument("--noise-levels", action="store_true", help="并入 NOISE_LEVELS 中的噪声档位场景")
     ap.add_argument("--save-samples", type=Path, help="逐样本保存各场景的真值与各方法的预测区段、测距误差（npz，键为 场景/字段）")
     ap.add_argument("--hidden", type=int, nargs=3, default=None, help="阶段一 MLP 隐层宽度，默认 160 160 96")
     ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），不运行 L1")
@@ -347,7 +350,8 @@ def main():
     if a.voltage_only:  # 仅电压的等价类更粗，另按含电流配置的 22 类划分统计区段准确率，便于与其余方法同口径比较
         cls_ref = np.array(json.loads((Path("results") / "evaluation.json").read_text())["equivalence_classes"])
     samples = {}
-    for name, (fn, noise_scale) in SCENARIOS.items():
+    scenarios = {**SCENARIOS, **(NOISE_LEVELS if a.noise_levels else {})}
+    for name, (fn, noise_scale) in scenarios.items():
         if not fp(fn).exists():
             continue
         ds = load_set(fp(fn), net, rows, sigma, seed=202, noise_scale=noise_scale, limit=a.limit_test)
@@ -361,7 +365,7 @@ def main():
         idx = np.arange(len(p))
         res = {}
         if a.save_samples:
-            samples.update({f"{name}/{k}": v for k, v in dict(sec_true=ds["sec"], d_true=ds["d_true"], rf=ds["rf"], ftype=ds["ftype"]).items()})
+            samples.update({f"{name}/{k}": v for k, v in dict(sec_true=ds["sec"], alpha=ds["alpha"], d_true=ds["d_true"], rf=ds["rf"], ftype=ds["ftype"]).items()})
             r_ours = decide(p, pen, j, al, ft, cls, th, k=k)
             for tag_m, sec_m, al_m in (("本方案", r_ours["sec"], r_ours["alpha"]), ("硬串联", top1, al[idx, top1]),
                                        ("物理穷举", pen.argmin(1), al[idx, pen.argmin(1)])):

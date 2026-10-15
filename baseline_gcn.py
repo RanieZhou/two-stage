@@ -22,7 +22,7 @@ import torch
 from scipy.sparse.csgraph import dijkstra
 from torch import nn
 
-from evaluate_pipeline import SCENARIOS, load_set
+from evaluate_pipeline import NOISE_LEVELS, SCENARIOS, load_set
 from ieee34_bus_impedance import CASES, Network, add_measurement_noise
 from simulate_dataset import read_sensor_data
 from stage1_classifier import features
@@ -215,6 +215,8 @@ def main():
     ap.add_argument("--export-probs", type=Path, help="导出验证集（val、val_gcn）与各场景上的区段概率，需单个 --modes。gcn_delta 用与评测脚本相同的带噪观测；gcn 用自身输入（故障期间相量）加噪")
     ap.add_argument("--train-extra", nargs="+", default=[], help="并入训练集的其他数据集文件名（不同线路阻抗倍率下的数据，需含故障前相量）")
     ap.add_argument("--seed", type=int, default=0, help="训练的随机种子")
+    ap.add_argument("--noise-levels", action="store_true", help="并入 NOISE_LEVELS 中的噪声档位场景")
+    ap.add_argument("--save-samples", type=Path, help="保存各场景的逐样本预测区段（npz，键为 模式/场景/sec）")
     ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34")
     ap.add_argument("--prepare", nargs=2, type=Path, metavar=("SRC", "DST"), help="从含 v0、i0 的数据集提取测点量测行")
     a = ap.parse_args()
@@ -237,6 +239,8 @@ def main():
     n_sec = len(net.sections)
 
     results = {"kn": a.kn, "filters": a.filters, "steps": a.steps}
+    scenarios = {**SCENARIOS, **(NOISE_LEVELS if a.noise_levels else {})}
+    samples = {}
     for mode in a.modes:
         builder = InputBuilder(net, buses, case["sensors"], mode, sigma, train, np.random.default_rng(1))
         model = train_gcn(builder, lap, train, n_sec, a.filters, a.steps, a.batch, a.lr, a.seed)
@@ -252,13 +256,14 @@ def main():
             if cls is not None:
                 res["验证集"]["class_acc"] = float((cls[sec] == cls[d["sec"]]).mean())
             print(mode, res["验证集"], flush=True)
-        for name in [] if a.val_only else SCENARIOS:
-            fn, noise_scale = SCENARIOS[name]
+        for name in [] if a.val_only else scenarios:
+            fn, noise_scale = scenarios[name]
             if not fp(fn).exists():
                 continue
             d = load_raw(fp(fn), rows)
             ds = load_set(fp(fn), net, rows, sigma, seed=202)
             sec = predict(model, builder, d, noise_scale, seed=202)
+            samples[f"{mode}/{name}/sec"] = sec
             d_pred = np.array([net.fault_distance_km(s, 0.5) for s in sec])
             d_orc = np.array([net.fault_distance_km(s, 0.5) for s in ds["sec"]])
             res[name] = dict(
@@ -271,7 +276,7 @@ def main():
         results[mode] = res
         if a.export_probs and mode == "gcn_delta":
             probs = {"val": predict_probs(model, builder, load_set(fp("val.npz"), net, rows, sigma, seed=101)["z"])}
-            for name, (fn, noise_scale) in SCENARIOS.items():
+            for name, (fn, noise_scale) in scenarios.items():
                 if fp(fn).exists():
                     probs[name] = predict_probs(model, builder, load_set(fp(fn), net, rows, sigma, seed=202, noise_scale=noise_scale)["z"])
             if a.case == "ieee34":   # 带故障前相量的验证集，供非线性精化标定
@@ -281,12 +286,14 @@ def main():
         if a.export_probs and mode == "gcn":
             assert len(a.modes) == 1, "导出区段概率时只能指定一个模式"
             probs = {"val": predict(model, builder, load_raw(fp("val_gcn.npz" if a.case == "ieee34" else "val.npz"), rows), 1.0, seed=101, probs=True)}
-            for name, (fn, noise_scale) in SCENARIOS.items():
+            for name, (fn, noise_scale) in scenarios.items():
                 if fp(fn).exists():
                     probs[name] = predict(model, builder, load_raw(fp(fn), rows), noise_scale, seed=202, probs=True)
             np.savez_compressed(a.export_probs, **probs)
     if not a.val_only:
         a.out.write_text(json.dumps(results, ensure_ascii=False, indent=1))
+        if a.save_samples:
+            np.savez_compressed(a.save_samples, **samples)
 
 
 if __name__ == "__main__":
