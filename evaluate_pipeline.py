@@ -97,7 +97,7 @@ def load_set(path, net, rows, sigma, seed, noise_scale=1.0, limit=0):
     z = add_measurement_noise(np.random.default_rng(seed), zc, sigma, noise_scale)
     cut = slice(None, limit or None)
     sec, alpha = d["sec"][cut], d["alpha"][cut]
-    return dict(zc=zc[cut], z=z[cut], sec=sec, alpha=alpha, rf=d["rf"][cut],
+    return dict(zc=zc[cut], z=z[cut], sec=sec, alpha=alpha, rf=d["rf"][cut], ftype=d["ftype"][cut],
                 d_true=np.array([net.fault_distance_km(s, a) for s, a in zip(sec, alpha)]))
 
 
@@ -249,6 +249,7 @@ def main():
     ap.add_argument("--seed", type=int, default=0, help="阶段一训练的随机种子（初始化与批次采样）")
     ap.add_argument("--no-l1", action="store_true", help="不运行 L1（多种子评测时 L1 与种子无关）")
     ap.add_argument("--no-timing", action="store_true", help="不测推断耗时")
+    ap.add_argument("--save-samples", type=Path, help="逐样本保存各场景的真值与各方法的预测区段、测距误差（npz，键为 场景/字段）")
     ap.add_argument("--hidden", type=int, nargs=3, default=None, help="阶段一 MLP 隐层宽度，默认 160 160 96")
     ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），不运行 L1")
     a = ap.parse_args()
@@ -345,6 +346,7 @@ def main():
         print("非线性精化 λ_nl", lam_nl, "校准样本数", int(gate.sum()), flush=True)
     if a.voltage_only:  # 仅电压的等价类更粗，另按含电流配置的 22 类划分统计区段准确率，便于与其余方法同口径比较
         cls_ref = np.array(json.loads((Path("results") / "evaluation.json").read_text())["equivalence_classes"])
+    samples = {}
     for name, (fn, noise_scale) in SCENARIOS.items():
         if not fp(fn).exists():
             continue
@@ -358,6 +360,13 @@ def main():
         top1 = order[:, 0]
         idx = np.arange(len(p))
         res = {}
+        if a.save_samples:
+            samples.update({f"{name}/{k}": v for k, v in dict(sec_true=ds["sec"], d_true=ds["d_true"], rf=ds["rf"], ftype=ds["ftype"]).items()})
+            r_ours = decide(p, pen, j, al, ft, cls, th, k=k)
+            for tag_m, sec_m, al_m in (("本方案", r_ours["sec"], r_ours["alpha"]), ("硬串联", top1, al[idx, top1]),
+                                       ("物理穷举", pen.argmin(1), al[idx, pen.argmin(1)])):
+                samples[f"{name}/{tag_m}/sec"] = sec_m
+                samples[f"{name}/{tag_m}/d_err"] = np.abs(distance(net, sec_m, al_m) - ds["d_true"])
         res["基准1 硬串联"] = summarize(net, top1, al[idx, top1], ds, cls, top1)
         res["基准3 物理穷举"] = summarize(net, pen.argmin(1), al[idx, pen.argmin(1)], ds, cls, top1)
         res["基准4 Oracle"] = summarize(net, ds["sec"], al[idx, ds["sec"]], ds, cls, top1)
@@ -392,6 +401,8 @@ def main():
         results[name] = res
         print(name, json.dumps(res, ensure_ascii=False, indent=1), flush=True)
 
+    if a.save_samples:
+        np.savez_compressed(a.save_samples, **samples)
     # ---- 推断耗时：1000 个域内样本 ----
     if a.no_timing:
         (a.out / "evaluation.json").write_text(json.dumps(results, ensure_ascii=False, indent=1))
