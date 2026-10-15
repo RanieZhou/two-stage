@@ -149,12 +149,14 @@ class GATLayer(nn.Module):
         self.a_src = nn.Parameter(torch.randn(heads, self.f) * 0.1)
         self.a_dst = nn.Parameter(torch.randn(heads, self.f) * 0.1)
 
-    def forward(self, x, adj):
+    def forward(self, x, nbr, nmask):
+        """nbr (N, D)：每个节点的邻居序号（含自身，不足 D 个的补 0），nmask (N, D)：有效位置。只在邻居上计算注意力，与稠密实现等价。"""
         h = self.lin(x).view(x.shape[0], x.shape[1], self.h, self.f)               # (B, N, H, F)
-        e = nn.functional.leaky_relu((h * self.a_src).sum(-1)[:, :, None, :] + (h * self.a_dst).sum(-1)[:, None, :, :], 0.2)   # (B, N, N, H)
-        e = e.masked_fill(adj[None, :, :, None] == 0, float("-inf"))
+        h_nb = h[:, nbr]                                                            # (B, N, D, H, F)
+        e = nn.functional.leaky_relu((h * self.a_dst).sum(-1)[:, :, None, :] + (h_nb * self.a_src).sum(-1), 0.2)   # (B, N, D, H)
+        e = e.masked_fill(~nmask[None, :, :, None], float("-inf"))
         att = torch.softmax(e, dim=2)
-        return torch.einsum("bijh,bjhf->bihf", att, h).reshape(x.shape[0], x.shape[1], self.h * self.f)
+        return (att[..., None] * h_nb).sum(2).reshape(x.shape[0], x.shape[1], self.h * self.f)
 
 
 class GCN(nn.Module):
@@ -164,6 +166,16 @@ class GCN(nn.Module):
         dims = (n_in,) + (filters,) * len(CONV_K)
         self.conv = nn.ModuleList(ChebLayer(dims[i], dims[i + 1], k) for i, k in enumerate(CONV_K) ) if arch == "cheb" else nn.ModuleList(
             GATLayer(dims[i], dims[i + 1]) for i in range(len(CONV_K)))
+        if arch == "gat":   # lap 此时为物理邻接矩阵：整理成按节点补齐的邻居表
+            adj = lap > 0
+            deg = adj.sum(1).max()
+            nbr = np.zeros((lap.shape[0], deg), dtype=np.int64)
+            msk = np.zeros((lap.shape[0], deg), dtype=bool)
+            for i in range(lap.shape[0]):
+                js = np.where(adj[i])[0]
+                nbr[i, :len(js)], msk[i, :len(js)] = js, True
+            self.register_buffer("nbr", torch.from_numpy(nbr))
+            self.register_buffer("nmask", torch.from_numpy(msk))
         n = lap.shape[0] * filters
         self.fc = nn.Sequential(
             nn.Dropout(0.5), nn.Linear(n, hidden[0]), nn.ReLU(),
@@ -171,13 +183,13 @@ class GCN(nn.Module):
 
     def forward(self, x):
         for layer in self.conv:
-            x = torch.relu(layer(x, self.lap)) if isinstance(layer, ChebLayer) else nn.functional.elu(layer(x, self.lap))
+            x = torch.relu(layer(x, self.lap)) if isinstance(layer, ChebLayer) else nn.functional.elu(layer(x, self.nbr, self.nmask))
         return self.fc(x.flatten(1))
 
 
-def train_gcn(builder, lap, train, n_classes, filters, steps, batch, lr, seed=0, arch="cheb"):
+def train_gcn(builder, lap, train, n_classes, filters, steps, batch, lr, seed=0, arch="cheb", threads=1):
     torch.manual_seed(seed)
-    torch.set_num_threads(1)
+    torch.set_num_threads(threads)
     rng = np.random.default_rng(seed)
     model = GCN(lap, builder.nf, n_classes, filters, arch=arch)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
@@ -247,6 +259,7 @@ def main():
     ap.add_argument("--train-extra", nargs="+", default=[], help="并入训练集的其他数据集文件名（不同线路阻抗倍率下的数据，需含故障前相量）")
     ap.add_argument("--seed", type=int, default=0, help="训练的随机种子")
     ap.add_argument("--noise-levels", action="store_true", help="并入 NOISE_LEVELS 中的噪声档位场景")
+    ap.add_argument("--threads", type=int, default=1, help="训练用的线程数（默认 1，结果可复现；IEEE 123 的大图训练可加大以缩短时间）")
     ap.add_argument("--arch", choices=["cheb", "gat"], default="cheb", help="图层：切比雪夫卷积（GCN）或多头图注意力（GAT）")
     ap.add_argument("--save-samples", type=Path, help="保存各场景的逐样本预测区段（npz，键为 模式/场景/sec）")
     ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34")
@@ -277,7 +290,7 @@ def main():
     samples = {}
     for mode in a.modes:
         builder = InputBuilder(net, buses, case["sensors"], mode, sigma, train, np.random.default_rng(1))
-        model = train_gcn(builder, lap, train, n_sec, a.filters, a.steps, a.batch, a.lr, a.seed, a.arch)
+        model = train_gcn(builder, lap, train, n_sec, a.filters, a.steps, a.batch, a.lr, a.seed, a.arch, a.threads)
         res = {}
         # 等价类来自 evaluate_pipeline.py；仅 --val-only 调参时允许缺省
         cls = np.array(json.loads(eval_json.read_text())["equivalence_classes"]) if eval_json.exists() else None
