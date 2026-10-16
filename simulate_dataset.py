@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import opendssdirect as dss
 
-from ieee34_bus_impedance import CASES, IEEE34, Network, _complex, load_circuit
+from ieee34_bus_impedance import CASES, IEEE34, Network, _complex, load_circuit, with_sensors
 
 # (类型名, 故障相)，相别为 1/2/3
 FAULT_TYPES = [
@@ -237,6 +237,7 @@ if __name__ == "__main__":
     ap.add_argument("--line-z-spread", type=float, default=0.0, help="逐样本各区段线路阻抗独立乘 U(1−x, 1+x)")
     ap.add_argument("--load-indep", type=float, nargs=2, metavar=("LO", "HI"), help="逐样本各负荷功率独立乘 U(LO, HI)（此时全网倍率 --mult 应取 1 1）")
     ap.add_argument("--sensors", action="store_true", help="只保存该算例测点行上的突变量 zc 与故障前相量 pre（大系统用，省空间）")
+    ap.add_argument("--n-sensors", type=int, help="与 --sensors 合用：保存贪心顺序的前 N 个测点（默认为算例的测点）")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     a.out = a.out.resolve()  # OpenDSS 编译会切换工作目录
@@ -244,7 +245,7 @@ if __name__ == "__main__":
                     bias=(a.line_z_spread, *(a.load_indep or (None, None))) if (a.line_z_spread or a.load_indep) else None)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     if a.sensors:
-        rows = Network(case=CASES[a.case]).sensor_rows(CASES[a.case]["sensors"])
+        rows = Network(case=CASES[a.case]).sensor_rows(with_sensors(CASES[a.case], a.n_sensors)["sensors"])
         zc = np.concatenate([data["dv"], data["di"]], 1)[:, rows]
         pre = np.concatenate([data["v0"], data["i0"]], 1)[:, rows]
         data = {k: v for k, v in data.items() if k not in ("dv", "di", "v0", "i0")} | dict(zc=zc, pre=pre)

@@ -35,6 +35,13 @@ CASES = {"ieee34": IEEE34, "ieee33": IEEE33, "ieee123": IEEE123}
 # 选点依据：以物理穷举定位的平均测距误差为目标做贪心前向选择，5 个测点位于互不相同的母线。
 SENSORS = [("l6", 1), ("l30", 1), ("l2", 0), ("l11", 1), ("l29", 1)]
 IEEE34["sensors"] = SENSORS
+# 测点数量扫描用的 8 个测点（前 5 个即 SENSORS，第 6–8 个由 select_sensors.py 以 --init 继续贪心选取，见 results/sensor_selection_ieee34.json）
+SENSOR_ORDER_34 = SENSORS + [("l26", 1), ("l27", 1), ("l23", 0)]
+
+
+def with_sensors(case, n):
+    """算例的前 n 个测点（IEEE 34 按 select_sensors.py 的贪心顺序，results/sensor_selection_ieee34.json；n 为 None 时不变）。"""
+    return case if n is None else {**case, "sensors": SENSOR_ORDER_34[:n]}
 
 
 def load_circuit(load_mult=1.0, fix_taps=True, case=IEEE34):
@@ -214,6 +221,28 @@ class Network:
         s = self.sections[sec]
         d1, d2 = self.distance_km[s["bus1"]], self.distance_km[s["bus2"]]
         return d1 + alpha * (d2 - d1)
+
+    def path_distance_km(self, sec_a, alpha_a, sec_b, alpha_b):
+        """两个故障点（区段序号与位置比例，可为数组）沿馈线的最短路径长度（km）；同一区段内为位置差乘区段长度。"""
+        if not hasattr(self, "_end_dist"):
+            buses = sorted(self.adj)
+            index = {b: i for i, b in enumerate(buses)}
+            graph = np.zeros((len(buses),) * 2)
+            for u, nbrs in self.adj.items():
+                for v, d in nbrs:
+                    graph[index[u], index[v]] = graph[index[v], index[u]] = max(d, 1e-9)   # 零长度连接用极小正值，保持连通
+            from scipy.sparse import csr_matrix
+            from scipy.sparse.csgraph import shortest_path
+            bus_dist = shortest_path(csr_matrix(graph), directed=False)
+            ends = np.array([[index[s["bus1"]], index[s["bus2"]]] for s in self.sections])
+            self._end_dist = bus_dist[ends[:, :, None, None], ends[None, None, :, :]]   # (区段, 端, 区段, 端)
+            self._sec_len = np.array([s["length_km"] for s in self.sections])
+        sa, sb = np.asarray(sec_a), np.asarray(sec_b)
+        aa, ab = np.asarray(alpha_a, dtype=float), np.asarray(alpha_b, dtype=float)
+        to_end = lambda sec, al: np.stack([al * self._sec_len[sec], (1 - al) * self._sec_len[sec]], -1)   # 到 bus1、bus2 端的距离
+        da, db = to_end(sa, aa), to_end(sb, ab)
+        via = da[..., :, None] + self._end_dist[sa, :, sb, :] + db[..., None, :]
+        return np.where(sa == sb, np.abs(aa - ab) * self._sec_len[sa], via.reshape(*via.shape[:-2], 4).min(-1))
 
     def assemble(self, split=None, loads=True):
         """装配节点导纳矩阵（电源内阻抗作为接地并联导纳）。

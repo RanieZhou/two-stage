@@ -2,7 +2,7 @@
 
 测点为 (线路名, 端子)，量测该端母线各相电压与该端线路电流；要求已选测点位于互不相同的母线。
 评测样本为各区段等概率的仿真故障（由 simulate_dataset.py 生成），物理穷举用粗 α 网格、名义线路阻抗的单一假设。
-IEEE 34 的测点按同一准则选出（当时的选择脚本未保存在仓库中）；IEEE 123 的选择结果见 results/sensor_selection_ieee123.json。
+IEEE 34 的前 5 个测点按同一准则选出（当时的选择脚本未保存在仓库中），第 6–8 个由 --init 以这 5 个为起点继续选取，结果见 results/sensor_selection_ieee34.json；IEEE 123 的选择结果见 results/sensor_selection_ieee123.json。
 """
 import argparse
 import json
@@ -34,14 +34,14 @@ def objective(sensors):
     return float(np.abs(d_hat - d_true).mean()), float((hat == sec).mean())
 
 
-def greedy(net, data, k, workers):
+def greedy(net, data, k, workers, init=()):
     zc = np.concatenate([data["dv"], data["di"]], 1).astype(complex)
     _state.update(net=net, lib=net.response_library(ALPHAS), zc=zc, sec=data["sec"],
                   d_true=np.array([net.fault_distance_km(s, a) for s, a in zip(data["sec"], data["alpha"])]))
     candidates = [(s["name"], t) for s in net.sections for t in (0, 1)]
     bus_of = lambda c: net.sections[net.section_index[c[0]]]["bus1" if c[1] == 0 else "bus2"]
-    chosen, history = [], []
-    for step in range(k):
+    chosen, history = list(init), []
+    for step in range(len(chosen), k):
         used = {bus_of(c) for c in chosen}
         pool = [c for c in candidates if bus_of(c) not in used]
         with threadpool_limits(1), Pool(workers) as p:
@@ -60,9 +60,10 @@ if __name__ == "__main__":
     ap.add_argument("--data", type=Path, required=True)
     ap.add_argument("--k", type=int, default=12)
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--init", nargs="*", default=[], help="已选测点（线路名:端子，如 l6:1），从它们之后继续贪心选取")
     ap.add_argument("--out", type=Path, required=True)
     a = ap.parse_args()
     net = Network(case=CASES[a.case])
     with np.load(a.data) as f:
         data = {k: f[k] for k in f.files}
-    a.out.write_text(json.dumps(greedy(net, data, a.k, a.workers), ensure_ascii=False, indent=1))
+    a.out.write_text(json.dumps(greedy(net, data, a.k, a.workers, [(n, int(t)) for n, t in (x.split(':') for x in a.init)]), ensure_ascii=False, indent=1))

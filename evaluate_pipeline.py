@@ -42,7 +42,7 @@ from threadpoolctl import threadpool_limits
 
 from baseline_l1 import TOP_K, L1Locator, greedy_pmu_placement, noisy_dv, run_l1
 from cross_stage_verifier import Thresholds, decide, equivalence_classes, fit_lambda
-from ieee34_bus_impedance import CASES, Network, add_measurement_noise
+from ieee34_bus_impedance import CASES, Network, add_measurement_noise, with_sensors
 from simulate_dataset import read_sensor_data
 from stage1_classifier import features, logits_of, probabilities, train
 from scipy.optimize import minimize_scalar
@@ -143,11 +143,13 @@ def summarize(net, sec, alpha, ds, cls, stage1_top1):
     ok = cls[sec] == cls[ds["sec"]]
     ok1 = cls[stage1_top1] == cls[ds["sec"]]
     err = np.abs(distance(net, sec, alpha) - ds["d_true"])
+    perr = net.path_distance_km(sec, alpha, ds["sec"], ds["alpha"])
     return dict(
         class_acc=float(ok.mean()),
         CR=float(ok[~ok1].mean()) if (~ok1).any() else float("nan"),
         FCR=float((~ok[ok1]).mean()) if ok1.any() else float("nan"),
         d_mean=float(err.mean()), d_median=float(np.median(err)), d_p90=float(np.percentile(err, 90)),
+        p_mean=float(perr.mean()), p_median=float(np.median(perr)), p_p90=float(np.percentile(perr, 90)),
     )
 
 
@@ -254,11 +256,13 @@ def main():
     ap.add_argument("--noise-levels", action="store_true", help="并入 NOISE_LEVELS 中的噪声档位场景")
     ap.add_argument("--save-samples", type=Path, help="逐样本保存各场景的真值与各方法的预测区段、测距误差（npz，键为 场景/字段）")
     ap.add_argument("--hidden", type=int, nargs=3, default=None, help="阶段一 MLP 隐层宽度，默认 160 160 96")
+    ap.add_argument("--n-sensors", type=int, help="只用贪心顺序的前 N 个测点（IEEE 34 测点数量扫描）；未给 --classes 时等价类由自由复电流物理模型在 analysis.npz 上定义（与主评测同口径）")
+    ap.add_argument("--scenarios", nargs="+", help="只评测所列场景")
     ap.add_argument("--voltage-only", action="store_true", help="消融：测点只用电压相量（不用线路电流），不运行 L1")
     a = ap.parse_args()
     a.out.mkdir(exist_ok=True)
 
-    case = CASES[a.case]
+    case = with_sensors(CASES[a.case], a.n_sensors)
     fp = (lambda name: a.data / name) if a.case == "ieee34" else (lambda name: a.data / f"{a.case}_{name}")   # 数据与缓存文件路径
     net = Network(case=case)
     rows = net.sensor_rows(case["sensors"])
@@ -289,7 +293,9 @@ def main():
     tr = read_sensor_data(fp("train.npz"), rows)
     for name in a.train_extra:
         extra = read_sensor_data(a.data / name, rows)
-        if extra["zc"].shape[1] != len(rows):   # 只存测点行的数据集按算例的完整测点列保存，仅电压时取其中的电压列
+        if a.n_sensors:   # 测点数量扫描的扩增集按 8 个测点保存，取前 N 个测点的列
+            extra["zc"] = extra["zc"][:, :len(rows)]
+        elif extra["zc"].shape[1] != len(rows):   # 只存测点行的数据集按算例的完整测点列保存，仅电压时取其中的电压列
             extra["zc"] = extra["zc"][:, net.sensor_rows(case["sensors"]) < len(net.nodes)]
         tr = {k: np.concatenate([tr[k], extra[k]]) for k in ("sec", "zc")}
     zc_tr = tr["zc"]
@@ -312,7 +318,10 @@ def main():
         cls = np.array(json.loads(a.classes.read_text())["equivalence_classes"])
     else:
         ana = load_set(fp("analysis.npz"), net, rows, sigma, seed=303)
-        pen_a = physics_cached(pm, ana["z"], fp(f"phys_analysis_{tag}.npz"))[0]
+        pm_cls = pm
+        if a.n_sensors:   # 与主评测的等价类同口径：由自由复电流物理模型的惩罚残差定义
+            pm_cls = PhysicsModel(net, [Network(line_z_scale=z, case=case).response_library(ALPHAS) for z in z_scales], prior_pen, rows, sigma, EPS_REL, EPS_ABS)
+        pen_a = physics_cached(pm_cls, ana["z"], fp(f"phys_analysis_{phys_tag(case['sensors'], z_scales)}.npz") if a.n_sensors else fp(f"phys_analysis_{tag}.npz"))[0]
         cls = equivalence_classes(pen_a, ana["sec"])
     print("等价类数", cls.max() + 1, [list(np.where(cls == c)[0]) for c in range(cls.max() + 1) if (cls == c).sum() > 1], flush=True)
 
@@ -352,7 +361,7 @@ def main():
     samples = {}
     scenarios = {**SCENARIOS, **(NOISE_LEVELS if a.noise_levels else {})}
     for name, (fn, noise_scale) in scenarios.items():
-        if not fp(fn).exists():
+        if not fp(fn).exists() or (a.scenarios and name not in a.scenarios):
             continue
         ds = load_set(fp(fn), net, rows, sigma, seed=202, noise_scale=noise_scale, limit=a.limit_test)
         p = probabilities(logits_of(model, features(ds["z"], sigma)))
@@ -371,6 +380,8 @@ def main():
                                        ("物理穷举", pen.argmin(1), al[idx, pen.argmin(1)])):
                 samples[f"{name}/{tag_m}/sec"] = sec_m
                 samples[f"{name}/{tag_m}/d_err"] = np.abs(distance(net, sec_m, al_m) - ds["d_true"])
+                samples[f"{name}/{tag_m}/alpha"] = al_m
+                samples[f"{name}/{tag_m}/p_err"] = net.path_distance_km(sec_m, al_m, ds["sec"], ds["alpha"])
         res["基准1 硬串联"] = summarize(net, top1, al[idx, top1], ds, cls, top1)
         res["基准3 物理穷举"] = summarize(net, pen.argmin(1), al[idx, pen.argmin(1)], ds, cls, top1)
         res["基准4 Oracle"] = summarize(net, ds["sec"], al[idx, ds["sec"]], ds, cls, top1)

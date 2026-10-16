@@ -25,7 +25,7 @@ from scipy.sparse.csgraph import dijkstra
 from torch import nn
 
 from evaluate_pipeline import NOISE_LEVELS, SCENARIOS, load_set
-from ieee34_bus_impedance import CASES, Network, add_measurement_noise
+from ieee34_bus_impedance import CASES, Network, add_measurement_noise, with_sensors
 from simulate_dataset import read_sensor_data
 from stage1_classifier import features
 
@@ -263,10 +263,13 @@ def main():
     ap.add_argument("--arch", choices=["cheb", "gat"], default="cheb", help="图层：切比雪夫卷积（GCN）或多头图注意力（GAT）")
     ap.add_argument("--save-samples", type=Path, help="保存各场景的逐样本预测区段（npz，键为 模式/场景/sec）")
     ap.add_argument("--case", choices=["ieee34", "ieee123"], default="ieee34")
+    ap.add_argument("--n-sensors", type=int, help="只用贪心顺序的前 N 个测点（IEEE 34 测点数量扫描）；仅 gcn_delta 模式，训练集取 train.npz，扩增集按 8 个测点保存")
+    ap.add_argument("--scenarios", nargs="+", help="只评测所列场景")
+    ap.add_argument("--classes", type=Path, help="等价类所在的评测结果 json（默认 results/evaluation.json）")
     ap.add_argument("--prepare", nargs=2, type=Path, metavar=("SRC", "DST"), help="从含 v0、i0 的数据集提取测点量测行")
     a = ap.parse_args()
 
-    case = CASES[a.case]
+    case = with_sensors(CASES[a.case], a.n_sensors)
     fp = (lambda name: a.data / name) if a.case == "ieee34" else (lambda name: a.data / f"{a.case}_{name}")
     net = Network(case=case)
     rows = net.sensor_rows(case["sensors"])
@@ -278,15 +281,21 @@ def main():
     if a.arch == "gat":
         lap = physical_adjacency(net, buses)
     print(f"图：{len(buses)} 个母线，Kn={a.kn}", flush=True)
-    train = load_raw(fp("train_gcn.npz" if a.case == "ieee34" else "train.npz"), rows)
+    if a.n_sensors:
+        assert a.modes == ["gcn_delta"], "测点数量扫描只支持 gcn_delta（gcn 模式需要故障前相量）"
+    train = load_raw(fp("train_gcn.npz" if a.case == "ieee34" and not a.n_sensors else "train.npz"), rows)
     for name in a.train_extra:
         extra = load_raw(a.data / name, rows)
-        train = {k: np.concatenate([train[k], extra[k]]) for k in train}
-    eval_json = Path("results/evaluation.json") if a.case == "ieee34" else Path(f"results/{a.case}/evaluation.json")
+        if a.n_sensors:
+            extra["zc"] = extra["zc"][:, :len(rows)]
+        train = {k: np.concatenate([train[k], extra[k]]) for k in ("sec", "alpha", "zc")} if a.n_sensors else {k: np.concatenate([train[k], extra[k]]) for k in train}
+    eval_json = a.classes or (Path("results/evaluation.json") if a.case == "ieee34" else Path(f"results/{a.case}/evaluation.json"))
     n_sec = len(net.sections)
 
     results = {"kn": a.kn, "filters": a.filters, "steps": a.steps}
     scenarios = {**SCENARIOS, **(NOISE_LEVELS if a.noise_levels else {})}
+    if a.scenarios:
+        scenarios = {k: v for k, v in scenarios.items() if k in a.scenarios}
     samples = {}
     for mode in a.modes:
         builder = InputBuilder(net, buses, case["sensors"], mode, sigma, train, np.random.default_rng(1))
@@ -318,6 +327,7 @@ def main():
                 class_acc=float((cls[sec] == cls[ds["sec"]]).mean()),
                 d_mean_midpoint=float(np.abs(d_pred - ds["d_true"]).mean()),
                 d_mean_oracle_section_midpoint=float(np.abs(d_orc - ds["d_true"]).mean()),
+                p_mean_midpoint=float(net.path_distance_km(sec, 0.5, ds["sec"], ds["alpha"]).mean()),
             )
             print(mode, name, json.dumps(res[name], ensure_ascii=False), flush=True)
         results[mode] = res
@@ -326,7 +336,7 @@ def main():
             for name, (fn, noise_scale) in scenarios.items():
                 if fp(fn).exists():
                     probs[name] = predict_probs(model, builder, load_set(fp(fn), net, rows, sigma, seed=202, noise_scale=noise_scale)["z"])
-            if a.case == "ieee34":   # 带故障前相量的验证集，供非线性精化标定
+            if a.case == "ieee34" and not a.n_sensors:   # 带故障前相量的验证集，供非线性精化标定
                 d = load_raw(fp("val_gcn.npz"), rows)
                 probs["val_gcn"] = predict_probs(model, builder, add_measurement_noise(np.random.default_rng(101), d["zc"], sigma))
             np.savez_compressed(a.export_probs, **probs)
