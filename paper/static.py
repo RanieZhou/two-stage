@@ -136,13 +136,12 @@ def setup(d):
     d.fig(2)
     w(t("### 4.2 测试场景\n", "### 4.2 Test scenarios\n"))
     w(t(
-        "所有场景使用同一个训练好的模型，只改变测试条件。“域内”与训练同分布。外推与鲁棒性场景为：负荷偏移（全网负荷 1.25–1.5 倍，超出训练的 0.6–1.1）；高阻外推（过渡电阻 300–1000 Ω，超出训练的 0.01–300 Ω）；噪声 ×3（量测噪声放大 3 倍）；"
-        "线路阻抗 ±10%（全网线路阻抗整体偏大或偏小，模型仍用名义值）；个别线路阻抗 ±20%（每条线路阻抗独立取名义值的 0.8–1.2 倍）。噪声敏感性取 ×0.5、×1、×2、×3、×5。"
-        "为与要求调压器档位已知的 Liang 两阶段方法比较，另有调压器档位固定的域内、负荷偏移、高阻外推、噪声 ×3 四个场景（各 3000 样本）。表 2 列出各场景的作用。",
-        "All scenarios use the same trained model and only change the test conditions. “In-domain” follows the training distribution. The extrapolation and robustness scenarios are: load shift (network-wide load 1.25–1.5 times, outside the trained 0.6–1.1); high resistance (fault resistance 300–1000 Ω, outside the trained 0.01–300 Ω); noise ×3 (measurement noise tripled); "
-        "line impedance ±10% (all line impedances globally larger or smaller while the model keeps nominal values); and individual line impedance ±20% (each line impedance independently 0.8–1.2 times its nominal value). The noise sensitivity sweep uses ×0.5, ×1, ×2, ×3 and ×5. "
-        "For comparison with the method of Liang et al., which requires known regulator taps, there are four additional scenarios with fixed taps (in-domain, load shift, high resistance, noise ×3; 3000 samples each). Table 2 lists the purpose of each scenario.\n"))
-    d.table2()
+        "所有场景使用同一个训练好的模型，只改变测试条件。核心场景 5 个：域内（与训练同分布）；负荷偏移（全网负荷 1.25–1.5 倍，训练为 0.6–1.1）；高阻外推（过渡电阻 300–1000 Ω，训练为 0.01–300 Ω）；噪声 ×3（量测噪声放大 3 倍）；"
+        "个别线路阻抗 ±20%（每条线路阻抗独立取名义值的 0.8–1.2 倍，模型仍用名义值）。此外，噪声敏感性取 ×0.5、×1、×2、×3、×5（图 3b）；与要求调压器档位已知的 Liang 两阶段方法比较时，用调压器档位固定的域内、负荷偏移、高阻外推、噪声 ×3 四个场景（各 3000 样本）；"
+        "全网线路阻抗整体偏差 ±5%/±10%、各负荷功率独立变化、线路与负荷同时偏差等补充场景见附录表 A5。",
+        "All scenarios use the same trained model and only change the test conditions. There are five core scenarios: in-domain (same distribution as training); load shift (network-wide load 1.25–1.5 times, trained 0.6–1.1); high resistance (fault resistance 300–1000 Ω, trained 0.01–300 Ω); noise ×3 (measurement noise tripled); "
+        "and individual line impedance ±20% (each line impedance independently 0.8–1.2 times its nominal value while the model keeps nominal values). In addition, the noise sensitivity uses ×0.5, ×1, ×2, ×3 and ×5 (Fig. 3b); for the comparison with the method of Liang et al., which requires known regulator taps, the four fixed-tap scenarios (in-domain, load shift, high resistance, noise ×3; 3000 samples each) are used; "
+        "supplementary scenarios such as global line-impedance errors of ±5%/±10%, independent load variation and combined line and load errors are in Table A5 of the appendix.\n"))
     w(t("### 4.3 对比方法\n", "### 4.3 Compared methods\n"))
     w(t(
         f"共 6 个外部方法，其中 4 个为已发表方法，2 个为机器学习基线，均在相同的训练集上训练、使用相同的量测。已发表方法：（1）GCN{c('Chen2019')}，切比雪夫图卷积，输入有“论文输入”（故障期间相量的幅值与相角）和“突变量输入”（与阶段一相同的特征）两种；"

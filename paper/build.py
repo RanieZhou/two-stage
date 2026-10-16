@@ -19,8 +19,6 @@ CAPTION = {
         "Fig. 3 (a) Class accuracy on IEEE 34 versus fault resistance (in-domain 0.01–300 Ω, high-resistance 300–1000 Ω; right of the dotted line is beyond the training range); (b) class accuracy versus measurement noise multiplier (solid: paper input, dashed: disturbance input for GCN and GAT; block-sparse Bayesian learning, below 50% from ×3 on, is not drawn)."),
     4: ("图 4 IEEE 34 上测距误差的累积分布：(左) 域内，(右) 高阻外推。",
         "Fig. 4 Cumulative distribution of the location error on IEEE 34: (left) in-domain, (right) high resistance."),
-    5: ("图 5 IEEE 34 外推与参数偏差场景下各方法的类准确率（均值，误差线为标准差；GCN、GAT 取每个场景准确率较高的输入）。",
-        "Fig. 5 Class accuracy of the methods under extrapolation and parameter-error scenarios on IEEE 34 (mean, error bars are standard deviations; for GCN and GAT the input with the higher accuracy in each scenario)."),
 }
 
 
@@ -64,8 +62,6 @@ class Doc:
     def table1(self):
         RS.table1(self)
 
-    def table2(self):
-        RS.table2(self)
 
 
 def build(lang):

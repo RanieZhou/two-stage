@@ -187,27 +187,6 @@ def fig4():
     save(fig, 4)
 
 
-# ---------------------------------------------------------------- 图 5：外推场景分组柱状图
-def fig5():
-    ms = json.load(open(R / "multi_seed.json"))
-    scs = ["负荷偏移", "高阻外推", "噪声×3", "线路阻抗+10%", "线路阻抗-10%", "个别线路阻抗±20%"]
-    en_sc = {"负荷偏移": "Load shift", "高阻外推": "High R", "噪声×3": "Noise ×3", "线路阻抗+10%": "Line Z +10%", "线路阻抗-10%": "Line Z −10%", "个别线路阻抗±20%": "Line Z ±20% (indiv.)"}
-    meths = [("本方案", "本方案"), ("GCN", ("GCN(论文输入)", "GCN(突变量输入)")), ("GAT", ("GAT(论文输入)", "GAT(突变量输入)")), ("PCA+SVM", "PCA+SVM"), ("PCA+随机森林", "PCA+随机森林")]
-    fig, ax = plt.subplots(figsize=(7.2, 3.1))
-    w = 0.16
-    for i, (mk, key) in enumerate(meths):
-        vals, errs = [], []
-        for s in scs:
-            keys = [key] if isinstance(key, str) else list(key)
-            best = max((ms[s][k] for k in keys if k in ms[s]), key=lambda x: x["mean"])
-            vals.append(best["mean"] * 100); errs.append(best["std"] * 100)
-        ax.bar(np.arange(len(scs)) + (i - 2) * w, vals, w * 0.92, yerr=errs, color=COL[mk], label=name(mk), error_kw=dict(lw=0.8, ecolor=INK2, capsize=1.5))
-    ax.set_xticks(np.arange(len(scs))); ax.set_xticklabels([s if zh else en_sc[s] for s in scs], fontsize=7.5)
-    ax.set_ylabel(T("类准确率 (%)", "Class accuracy (%)")); ax.set_ylim(30, 100)
-    ax.legend(fontsize=7, ncol=5, loc="lower center", bbox_to_anchor=(0.5, 1.0))
-    save(fig, 5)
-
-
-for n, f in ((1, fig1), (2, fig2), (3, fig3), (4, fig4), (5, fig5)):
+for n, f in ((1, fig1), (2, fig2), (3, fig3), (4, fig4)):
     if want(n):
         f()
