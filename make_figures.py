@@ -162,7 +162,7 @@ def fig3():
 
 
 # ---------------------------------------------------------------- 图 4：测距误差累积分布
-def fig4():
+def fig_loc():
     pe = np.load(R / "path_error_samples.npz")
     fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.0), sharey=True)
     for ax, sc, ttl in zip(axes, ("域内", "高阻外推"), (T("域内", "In-domain"), T("高阻外推（300–1000 Ω）", "High resistance (300–1000 Ω)"))):
@@ -174,9 +174,38 @@ def fig4():
         ax.set_xlim(0, 8); ax.set_xlabel(T("测距误差 (km)", "Location error (km)")); ax.set_title(ttl, loc="left", fontsize=9)
     axes[0].set_ylabel(T("累积比例 (%)", "Cumulative share (%)"))
     axes[0].legend(fontsize=7, loc="lower right")
+    save(fig, 5)
+
+
+def fig_sens():
+    sw = json.load(open(Path("results/improved/ieee34_sensors/sensor_sweep.json")))
+    ks = [int(k[1:]) for k in sw]
+    fig, axes = plt.subplots(2, 2, figsize=(7.2, 5.2), sharex=True)
+    sets = {"acc": [("本方案", "本方法 精确区段", "-"), ("GCN", "GCN 精确区段", "-"), ("神经网络 Top-1", "阶段一 精确区段", "--"), ("物理穷举", "物理穷举 精确区段", "--")],
+            "km": [("本方案", "本方法 测距误差", "-"), ("GCN", "GCN+物理定位 测距误差", "--"), ("GCN", "GCN 测距误差(区段中点)", ":"), ("物理穷举", "物理穷举 测距误差", "--")]}
+    labs = {"GCN+物理定位 测距误差": "GCN+" + T("物理定位", "physics location"), "GCN 测距误差(区段中点)": "GCN (" + T("区段中点", "section midpoint") + ")"}
+    for c, (sc, ttl) in enumerate((("域内", T("域内", "In-domain")), ("高阻外推", T("高阻外推（300–1000 Ω）", "High resistance (300–1000 Ω)")))):
+        for r, kind in enumerate(("acc", "km")):
+            ax = axes[r, c]
+            for m, key, ls in sets[kind]:
+                if key not in sw[f"n{ks[0]}"][sc]:
+                    continue
+                mean = np.array([sw[f"n{k}"][sc][key]["mean"] for k in ks]) * (100 if kind == "acc" else 1)
+                std = np.array([sw[f"n{k}"][sc][key]["std"] for k in ks]) * (100 if kind == "acc" else 1)
+                lab = labs.get(key, name(m))
+                ax.errorbar(ks, mean, yerr=std, color=COL[m], ls=ls, marker=MK[m], ms=4, lw=1.8 if m == "本方案" else 1.3, capsize=2, label=lab)
+            if r == 0:
+                ax.set_title(ttl, loc="left", fontsize=9)
+            if r == 1:
+                ax.set_xlabel(T("测点数量", "Number of sensors"))
+            ax.set_xticks(ks)
+    axes[0, 0].set_ylabel(T("精确区段准确率 (%)", "Exact section accuracy (%)"))
+    axes[1, 0].set_ylabel(T("测距误差 (km)", "Location error (km)"))
+    axes[0, 0].legend(fontsize=7, loc="lower right")
+    axes[1, 0].legend(fontsize=7, loc="center right")
     save(fig, 4)
 
 
-for n, f in ((1, fig1), (2, fig2), (3, fig3), (4, fig4)):
+for n, f in ((1, fig1), (2, fig2), (3, fig3), (4, fig_sens), (5, fig_loc)):
     if want(n):
         f()

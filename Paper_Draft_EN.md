@@ -122,7 +122,7 @@ Against the best of the other methods in each scenario (a difference counts as s
 
 Table 2b applies paired tests on the same seed-0 test samples (the other method is the best one of each scenario). For class accuracy, our method is significantly higher in 1 scenario(s) (High resistance +16.3 percentage points), significantly lower in 1 (Noise ×3 -1.4) and not significantly different in the other 3; for exact section accuracy it is significantly higher in 3 (In-domain +0.7, Load shift +1.0, High resistance +18.6) and significantly lower in 1 (Noise ×3 -1.0). A paired test contains only the randomness of the test samples, while the judgement by the standard deviation across seeds contains only the randomness of training; the two disagree in Noise ×3, Individual line impedance ±20%, and these scenarios are all treated as our method not being better than the other.
 
-When the line impedances are in error, baselines such as GCN are not below our method: under individual line impedance ±20% the GCN with the paper input is 0.5 percentage points higher; under global line-impedance errors of ±10% (Table A5) the gap is 1.4–2.6 points. This is because such errors make the nominal response library of stage 2 mismatched, so the section decision relies mainly on stage 1, and the baselines are trained on the same data as stage 1; Section 5.6 diagnoses the source of the loss.
+When the line impedances are in error, baselines such as GCN are not below our method: under individual line impedance ±20% the GCN with the paper input is 0.5 percentage points higher; under global line-impedance errors of ±10% (Table A5) the gap is 1.4–2.6 points. This is because such errors make the nominal response library of stage 2 mismatched, so the section decision relies mainly on stage 1, and the baselines are trained on the same data as stage 1; Section 5.7 diagnoses the source of the loss.
 
 **Table 3 Class accuracy (%, seed 0) of the IEEE 34 in-domain test set by fault type and fault position (GCN with the disturbance input, GAT with the disturbance input)**
 
@@ -148,11 +148,21 @@ Fig. 3(a) is direct evidence for the motivation of the method: the class accurac
 
 Fig. 3(b) shows the sensitivity to measurement noise: at noise multipliers ×0.5, ×1, ×2 our method is the highest or tied for the highest; at ×3 GCN (paper input) is 1.4 points higher; at ×5 GCN (paper input) is 5.0 points higher. The hard cascade of the neural network and physics-based location degrades faster as noise grows (75.2% at ×5 against 84.0% for our method).
 
-### 5.3 How far is the predicted fault point from the true one?
+### 5.3 How do the metrics change as sensors are removed?
 
-![Fig. 4 Cumulative distribution of the location error (shortest path along the feeder) on IEEE 34: (left) in-domain, (right) high resistance.](figures/en/fig4.png)
+![Fig. 4 Effect of the number of sensors on IEEE 34 (three seeds, error bars are standard deviations): top row, exact section accuracy; bottom row, location error (shortest path along the feeder); left column in-domain, right column high resistance.](figures/en/fig4.png)
 
-*Fig. 4 Cumulative distribution of the location error (shortest path along the feeder) on IEEE 34: (left) in-domain, (right) high resistance.*
+*Fig. 4 Effect of the number of sensors on IEEE 34 (three seeds, error bars are standard deviations): top row, exact section accuracy; bottom row, location error (shortest path along the feeder); left column in-domain, right column high resistance.*
+
+The sensors are the first K of the greedy order (K = 3, 4, 5, 6, 8; the first five are those of the main experiments and the rest are chosen by the same criterion, so the sets are nested and not the optimal placement for each K). For every K, stage 1 and the GCN (disturbance input) are retrained and stage 3 is recalibrated, and the equivalence classes are redefined for the sensors of that K (19–24 classes), so class accuracy is not comparable across K and Fig. 4 reports the exact section accuracy and the location error; three seeds, everything else as in the main experiments (Table A10; the numbers at K = 5 differ slightly from Table 2 because the augmentation training sets were regenerated and the number of seeds differs).
+
+In-domain, the exact section accuracy of our method rises from 91.4% at K = 3 to 94.6% at K = 5 and 95.4% at K = 8 (the second step adds only 0.8 percentage points, the first 3.2), and the location error falls from 0.60 km to 0.39 km; compared with GCN, the exact section accuracy of our method differs by +0.9 to +1.9 percentage points across K. Under high resistance our method is 12.9–23.4 percentage points above GCN and its location error is 1.35–3.11 km below that of GCN followed by physics-based location; this advantage persists when the sensors are reduced from 8 to 3. As in Section 5.2, under high resistance the exact section accuracy of the exhaustive physics-based inversion over all sections is 2.5–7.1 percentage points above that of our method for K ≥ 4, again because the Top-2 candidates miss the true section.
+
+### 5.4 How far is the predicted fault point from the true one?
+
+![Fig. 5 Cumulative distribution of the location error (shortest path along the feeder) on IEEE 34: (left) in-domain, (right) high resistance.](figures/en/fig5.png)
+
+*Fig. 5 Cumulative distribution of the location error (shortest path along the feeder) on IEEE 34: (left) in-domain, (right) high resistance.*
 
 **Table 4 Mean location error on IEEE 34 (km; shortest path along the feeder between the predicted and the true fault point, seed 0). The classifiers output only the section; the format is “section midpoint / followed by the stage-2 physics-based location” (inputs of GCN and GAT as in Table 2); the smallest in each row is in bold**
 
@@ -164,9 +174,9 @@ Fig. 3(b) shows the sensitivity to measurement noise: at noise multipliers ×0.5
 | Noise ×3 | **0.56** | 19.46 | 2.39 / 0.70 | 2.42 / 0.68 | 2.84 / 0.94 | 3.12 / 1.14 |
 | Individual line impedance ±20% | **1.00** | 5.77 | 2.36 / 1.01 | 2.40 / 1.04 | 2.51 / 1.05 | 2.48 / 1.03 |
 
-The classifier baselines output only the section and the fault point is taken at the section midpoint, so their location error is much larger (2.10–2.33 km in-domain); once their Top-1 section is handed to stage 2 to estimate the position within the section, the in-domain error falls to 0.46–0.54 km, close to our method (0.45 km), which shows that the accuracy of the position within a section comes mainly from the physics-based inversion. Under high resistance the classifiers followed by physics-based location still have 3.89–11.65 km against 1.45 km for our method, the difference coming from wrongly selected sections (Section 5.4). Block-sparse Bayesian learning estimates the position itself, but it is limited by the α grid and its error is large when it selects the wrong section (Fig. 4, Table 4).
+The classifier baselines output only the section and the fault point is taken at the section midpoint, so their location error is much larger (2.10–2.33 km in-domain); once their Top-1 section is handed to stage 2 to estimate the position within the section, the in-domain error falls to 0.46–0.54 km, close to our method (0.45 km), which shows that the accuracy of the position within a section comes mainly from the physics-based inversion. Under high resistance the classifiers followed by physics-based location still have 3.89–11.65 km against 1.45 km for our method, the difference coming from wrongly selected sections (Section 5.5). Block-sparse Bayesian learning estimates the position itself, but it is limited by the α grid and its error is large when it selects the wrong section (Fig. 5, Table 4).
 
-### 5.4 What does each component contribute?
+### 5.5 What does each component contribute?
 
 **Table 5 Controlled ablation of the physics model (IEEE 34, class accuracy %, seed 0; free: free complex injection current; con.: real fault resistance plus real gain; no gain: constrained with the gain fixed at 1). Everything except the physics model is identical**
 
@@ -196,7 +206,7 @@ Table 6 plugs the probabilities of GCN, GAT, PCA+SVM and PCA+RF in as stage 1 of
 
 The premise of the joint decision is that the errors of the two do not coincide (Table A8): when the neural network is wrong, the exhaustive physics-based inversion is right in 60% (in-domain) and 82% (high resistance) of the cases; when the physics-based inversion is wrong, the neural network is right in 86% and 54%. This does not by itself prove that the decline of the neural network is caused by features leaving the training range; the indirect evidence is that the GCN with the paper input (absolute during-fault phasors) declines more under high resistance (Table 2). Candidate expansion matters clearly only under high resistance (+2.3 percentage points) and noise ×3 (+0.9); statistics on confidence and alarm are in Table A4.
 
-### 5.5 How does it compare with the structurally closest method of Liang et al.?
+### 5.6 How does it compare with the structurally closest method of Liang et al.?
 
 **Table 7 Comparison with the two-stage method of Liang et al. in the fixed-tap scenarios (IEEE 34, class accuracy %; Liang is the best of its four variants; GCN with the higher input, P: paper input, D: disturbance input)**
 
@@ -211,7 +221,7 @@ Location error (mean): Fixed taps: in-domain: ours 0.47 km, Liang 1.02 km; Fixed
 
 The method of Liang et al. assumes exactly known regulator taps and network parameters and receives root-bus phasors, end-bus voltage magnitudes and load pseudo-measurements, more than our method, so it is compared only in the four fixed-tap scenarios. Our method is 10.9–26.7 percentage points higher in these four scenarios and also has the smaller location error. Note that this is our reimplementation from the paper, whose stage 1 is below the reported values (Table A3), so the original method may be underestimated.
 
-### 5.6 When line parameters are inaccurate, where does the loss come from?
+### 5.7 When line parameters are inaccurate, where does the loss come from?
 
 **Table 8 Diagnosis with the true per-line impedances under individual line impedance ±20% (IEEE 34, first 2500 samples; neural-network Top-1 is 89.2%)**
 
@@ -223,7 +233,7 @@ The method of Liang et al. assumes exactly known regulator taps and network para
 
 When each line impedance deviates independently by ±20%, the class accuracy of our method falls from 97.0% in-domain to 89.9%. The diagnosis in Table 8 hands the true per-line impedances of each sample to stage 2: the location error with the section known falls from 0.82 km to 0.42 km, back to the error-free level, so the larger position error comes from model mismatch; the class accuracy of the joint decision recovers only from 89.7% to 92.7%, so part of the loss in the section decision is the mismatch of stage 1 under per-line errors and cannot all be attributed to the physics model. Augmenting the stage-1 training set with the same error distribution improves the accuracy by only 0.6 percentage points (IEEE 34) and 1.4 (IEEE 123). Independent variation of the load powers has no effect (Table A5).
 
-### 5.7 Do the conclusions hold on the IEEE 123-bus system, and what is the computation cost?
+### 5.8 Do the conclusions hold on the IEEE 123-bus system, and what is the computation cost?
 
 **Table 9 Comparison on IEEE 123 (class accuracy %; GCN 3 seeds (2 for the individual-line scenario), GAT with the disturbance input only, simplified block-sparse Bayesian on 1000 samples per scenario, the rest seed 0); the best in each row is in bold**
 
@@ -241,7 +251,7 @@ On IEEE 123 (118 sections, 8 sensors), our method is significantly higher in 3 c
 
 **Scope of the method.** The gain of our method is concentrated where data-driven methods fail, namely extrapolation such as fault resistance beyond the training range; within the training distribution it is on par with the strongest data-driven baseline, and under line-impedance errors some baselines are higher. It is therefore suited to networks with very few sensors, where fault conditions may exceed the training coverage and the line parameters are comparatively reliable; if the line parameters themselves are inaccurate, parameter identification is needed first, or more accurate parameters as in the diagnosis with true per-line impedances.
 
-**Limitations.** (1) All results come from OpenDSS simulation; measurement noise and synchronization errors are assumed, there are no field fault data, and the gap between simulation and the field is characterized only indirectly by the model-error scenarios. (2) Section accuracy is judged on fixed equivalence classes; the exact section accuracy is about 2.5–3.3 percentage points lower (Table A2), but the ranking of the methods is essentially unchanged. (3) The baselines are our reimplementations from the descriptions in the papers and may differ from the original authors' code: for the method of Liang et al. the stage 1 we reproduced on the IEEE 33-bus system of their paper is below the reported values (Table A3), so the comparison with it represents the reimplementation; our block-sparse Bayesian learning uses a dictionary of positions within sections rather than the node injections of the original paper, does not use its within-block correlation matrix, and its position is limited by a grid; the SVM uses only a 30,000-sample training subset. (4) At 500–1000 Ω the joint decision is still below the exhaustive physics-based inversion because the Top-2 candidates miss the true section; on IEEE 123 the signal of high-resistance faults is close to the noise and all methods are low. (5) Distributed generation, topology reconfiguration, missing data and resonant-grounded systems are not covered, and the effect of the number of sensors is not tested systematically. (6) The cause of the decline of the neural network (features leaving the training range) is supported only indirectly. (7) The default lightweight MLP stage 1 is not always the strongest in every scenario (Table 6), and this paper does not select or ensemble stage-1 networks further.
+**Limitations.** (1) All results come from OpenDSS simulation; measurement noise and synchronization errors are assumed, there are no field fault data, and the gap between simulation and the field is characterized only indirectly by the model-error scenarios. (2) Section accuracy is judged on fixed equivalence classes; the exact section accuracy is about 2.5–3.3 percentage points lower (Table A2), but the ranking of the methods is essentially unchanged. (3) The baselines are our reimplementations from the descriptions in the papers and may differ from the original authors' code: for the method of Liang et al. the stage 1 we reproduced on the IEEE 33-bus system of their paper is below the reported values (Table A3), so the comparison with it represents the reimplementation; our block-sparse Bayesian learning uses a dictionary of positions within sections rather than the node injections of the original paper, does not use its within-block correlation matrix, and its position is limited by a grid; the SVM uses only a 30,000-sample training subset. (4) At 500–1000 Ω the joint decision is still below the exhaustive physics-based inversion because the Top-2 candidates miss the true section; on IEEE 123 the signal of high-resistance faults is close to the noise and all methods are low. (5) Distributed generation, topology reconfiguration, missing data and resonant-grounded systems are not covered, and the sweep of the number of sensors was done only on IEEE 34 with a nested greedy sequence of sensors, without comparing different placements. (6) The cause of the decline of the neural network (features leaving the training range) is supported only indirectly. (7) The default lightweight MLP stage 1 is not always the strongest in every scenario (Table 6), and this paper does not select or ensemble stage-1 networks further.
 
 ## 7 Conclusion
 
@@ -354,12 +364,27 @@ The simulations use the public OpenDSS IEEE 34- and IEEE 123-bus test feeders; t
 | Noise ×3 | 98 | 92.6 | 51.3 | 0.043 | 8.4 |
 | Individual line impedance ±20% | 98 | 90.8 | 56.9 | 0.062 | 0.9 |
 
-**Table A9 Inference time (batch of 1000 samples, one process on a 4-core CPU, measured while other jobs were running and therefore conservative)**
+**Table A9 Inference time (batch of 1000 samples amortized per sample, one process on a 4-core CPU, measured while other jobs were running and therefore conservative; not the end-to-end latency of a single event and excluding data acquisition and communication)**
 
 | System | Stage 1 (ms/sample) | Stage 2, Top-2 candidates (ms/sample) | Exhaustive physics over all sections (ms/sample) |
 |:--|---:|---:|---:|
 | IEEE 34 | 0.003 | 8.2 | 181 |
 | IEEE 123 | 0.008 | 3.9 | 337 |
+
+**Table A10 Numbers of the sensor-count sweep (IEEE 34, three seeds, mean ± standard deviation): exact section accuracy (%) and location error (km, shortest path along the feeder); “section known” is the position error of stage 2 when the true section is given**
+
+| Scenario | Sensors | Classes | Exact: ours | Exact: GCN | Exact: exhaustive physics | Error: ours | Error: GCN+physics | Error: exhaustive physics | Error: section known |
+|:--|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| In-domain | 3 | 19 | 91.4±0.1 | 89.5±0.2 | 85.2±0.0 | 0.60±0.00 | 0.68±0.01 | 0.68±0.00 | 0.51±0.00 |
+| In-domain | 4 | 21 | 93.7±0.1 | 92.7±0.1 | 86.5±0.0 | 0.46±0.00 | 0.47±0.00 | 0.54±0.00 | 0.39±0.00 |
+| In-domain | 5 | 22 | 94.6±0.2 | 93.4±0.1 | 87.2±0.0 | 0.45±0.00 | 0.47±0.00 | 0.53±0.00 | 0.41±0.00 |
+| In-domain | 6 | 22 | 94.9±0.1 | 93.3±0.0 | 90.0±0.0 | 0.40±0.00 | 0.42±0.00 | 0.43±0.00 | 0.37±0.00 |
+| In-domain | 8 | 24 | 95.4±0.1 | 94.0±0.3 | 91.6±0.0 | 0.39±0.00 | 0.41±0.01 | 0.40±0.00 | 0.37±0.00 |
+| High resistance | 3 | 19 | 75.4±0.7 | 56.0±7.6 | 71.1±0.0 | 2.51±0.04 | 5.18±0.61 | 2.60±0.00 | 1.65±0.00 |
+| High resistance | 4 | 21 | 79.7±0.8 | 59.7±3.0 | 84.2±0.0 | 1.42±0.06 | 3.69±0.28 | 1.17±0.00 | 0.82±0.00 |
+| High resistance | 5 | 22 | 81.7±0.3 | 61.7±3.7 | 84.2±0.0 | 1.42±0.02 | 3.83±0.32 | 1.11±0.00 | 0.81±0.00 |
+| High resistance | 6 | 22 | 82.0±1.2 | 58.7±1.8 | 86.5±0.0 | 1.13±0.07 | 4.24±0.38 | 0.91±0.00 | 0.62±0.00 |
+| High resistance | 8 | 24 | 82.5±1.2 | 69.6±0.8 | 89.6±0.0 | 1.09±0.08 | 2.44±0.11 | 0.77±0.00 | 0.60±0.00 |
 
 ### Validation of the reimplementation of the Liang et al. method
 

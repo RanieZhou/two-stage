@@ -1,0 +1,21 @@
+{
+ "kn": 6,
+ "filters": 64,
+ "steps": 6000,
+ "gcn_delta": {
+  "域内": {
+   "section_acc": 0.9377,
+   "class_acc": 0.9628,
+   "d_mean_midpoint": 2.0995746940864604,
+   "d_mean_oracle_section_midpoint": 2.0215910850070435,
+   "p_mean_midpoint": 2.1370147405374333
+  },
+  "高阻外推": {
+   "section_acc": 0.6904,
+   "class_acc": 0.7248,
+   "d_mean_midpoint": 4.163350906148861,
+   "d_mean_oracle_section_midpoint": 2.028570742738434,
+   "p_mean_midpoint": 4.3684888220015425
+  }
+ }
+}
