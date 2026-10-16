@@ -1,5 +1,5 @@
 """汇总 IEEE 34 测点数量扫描（results/improved/ieee34_sensors/n<K>/）：每个测点数、每个场景给出
-本方法、阶段一（MLP）、物理穷举与 GCN（突变量输入）的区段准确率（精确/等价类）、测距误差，均值与标准差（ddof=1）。
+本方法、阶段一（MLP）、物理穷举与 GCN（突变量输入）的区段准确率（精确/等价类）、测距误差（预测点与真实点沿馈线的最短路径距离），均值与标准差（ddof=1）。
 
 评测命令见 实验结果与分析.md；种子只改变神经网络的初始化与小批量抽样，测试样本相同。
 GCN 只输出区段：“区段中点”取区段中点为故障点，“+物理定位”把它的 Top-1 区段交给阶段二估计区段内位置，“+本方法的决策”把它的概率代入阶段三。
@@ -12,7 +12,7 @@ import numpy as np
 from ieee34_bus_impedance import SENSOR_ORDER_34
 
 ROOT = Path("results/improved/ieee34_sensors")
-KS = (3, 4, 5, 6, 8)
+KS = tuple(K for K in (3, 4, 5, 6, 8) if (ROOT / f"n{K}/s0/evaluation.json").exists())
 SCENARIOS = ("域内", "高阻外推")
 OURS = "本方案(联合打分+候选扩展)"
 
@@ -39,10 +39,10 @@ for K in KS:
             sm = np.load(d / f"s{s}_samples.npz")
             ok = lambda key: float((cls[sm[f"{sc}/{key}/sec"]] == cls[sm[f"{sc}/sec_true"]]).mean())
             row = {
-                "本方法 类准确率": ev[OURS]["class_acc"], "本方法 精确区段": exact(sm, sc, "本方案"), "本方法 测距误差": ev[OURS]["d_mean"],
+                "本方法 类准确率": ev[OURS]["class_acc"], "本方法 精确区段": exact(sm, sc, "本方案"), "本方法 测距误差": ev[OURS]["p_mean"],
                 "阶段一 类准确率": ev["基准1 硬串联"]["class_acc"], "阶段一 精确区段": exact(sm, sc, "硬串联"),
-                "物理穷举 类准确率": ev["基准3 物理穷举"]["class_acc"], "物理穷举 精确区段": exact(sm, sc, "物理穷举"), "物理穷举 测距误差": ev["基准3 物理穷举"]["d_mean"],
-                "真实区段已知 测距误差": ev["基准4 Oracle"]["d_mean"],
+                "物理穷举 类准确率": ev["基准3 物理穷举"]["class_acc"], "物理穷举 精确区段": exact(sm, sc, "物理穷举"), "物理穷举 测距误差": ev["基准3 物理穷举"]["p_mean"],
+                "真实区段已知 测距误差": ev["基准4 Oracle"]["p_mean"],
             }
             g = d / f"gcn_s{s}.json"
             if g.exists():
@@ -50,9 +50,9 @@ for K in KS:
                 gs = np.load(d / f"gcn_s{s}_swap_samples.npz")
                 sw = json.load(open(d / f"gcn_s{s}/evaluation.json"))[sc]
                 row.update({
-                    "GCN 类准确率": gr["class_acc"], "GCN 精确区段": gr["section_acc"], "GCN 测距误差(区段中点)": gr["d_mean_midpoint"],
-                    "GCN+物理定位 测距误差": sw["基准1 硬串联"]["d_mean"],
-                    "GCN+本方法的决策 类准确率": sw[OURS]["class_acc"], "GCN+本方法的决策 精确区段": exact(gs, sc, "本方案"), "GCN+本方法的决策 测距误差": sw[OURS]["d_mean"],
+                    "GCN 类准确率": gr["class_acc"], "GCN 精确区段": gr["section_acc"], "GCN 测距误差(区段中点)": gr["p_mean_midpoint"],
+                    "GCN+物理定位 测距误差": sw["基准1 硬串联"]["p_mean"],
+                    "GCN+本方法的决策 类准确率": sw[OURS]["class_acc"], "GCN+本方法的决策 精确区段": exact(gs, sc, "本方案"), "GCN+本方法的决策 测距误差": sw[OURS]["p_mean"],
                 })
             for k, v in row.items():
                 acc.setdefault(k, []).append(v)

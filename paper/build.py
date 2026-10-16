@@ -17,8 +17,8 @@ CAPTION = {
         "Fig. 2 Topology of the test systems (rooted at the substation, horizontal axis is the distance along the feeder to the substation) and sensor locations."),
     3: ("图 3 (a) IEEE 34 上类准确率随过渡电阻的变化（域内为 0.01–300 Ω，高阻外推为 300–1000 Ω，虚线右侧超出训练范围）；(b) 类准确率随量测噪声倍数的变化（GCN、GAT 的论文输入为实线、突变量输入为虚线；块稀疏贝叶斯学习从 ×3 起低于 50%，未画出）。",
         "Fig. 3 (a) Class accuracy on IEEE 34 versus fault resistance (in-domain 0.01–300 Ω, high-resistance 300–1000 Ω; right of the dotted line is beyond the training range); (b) class accuracy versus measurement noise multiplier (solid: paper input, dashed: disturbance input for GCN and GAT; block-sparse Bayesian learning, below 50% from ×3 on, is not drawn)."),
-    4: ("图 4 IEEE 34 上测距误差的累积分布：(左) 域内，(右) 高阻外推。",
-        "Fig. 4 Cumulative distribution of the location error on IEEE 34: (left) in-domain, (right) high resistance."),
+    4: ("图 4 IEEE 34 上测距误差（沿馈线的最短路径距离）的累积分布：(左) 域内，(右) 高阻外推。",
+        "Fig. 4 Cumulative distribution of the location error (shortest path along the feeder) on IEEE 34: (left) in-domain, (right) high resistance."),
 }
 
 

@@ -4,7 +4,7 @@
 
 ## Abstract
 
-With only a handful of synchronized sensors in a distribution network, existing fault-location methods each fall short: data-driven methods lose accuracy when test conditions leave the training distribution, and physics-based inversion, which is insensitive to the training distribution, cannot separate sections whose responses are similar. We propose a two-stage method of data-driven screening and physics-based closed-loop verification: a neural network narrows the faulted section to two candidates, a physics-based inversion with a real-valued fault resistance verifies each candidate and estimates the position within the section, and a Bayesian joint score combines the two pieces of evidence; when no candidate explains the measurements the search is widened, and if it still fails a mismatch alarm is raised. On the IEEE 34-bus feeder (5 sensors, 30 sections), when the fault resistance leaves the training range (300–1000 Ω) our method reaches a section accuracy (judged by equivalence class) of 85.2%, against 69.6% for the best external method compared; within the training distribution it is on par with the strongest baseline (97.0% against at most 97.1%); restricting the fault resistance to a real number raises the section accuracy of the physics-based inversion by 6.6–12.4 percentage points in all 16 scenarios; and in the four fixed-tap scenarios it is 10.9–26.7 percentage points above the two-stage method of Liang et al. On the IEEE 123-bus feeder (8 sensors, 118 sections) it is significantly better than the other methods in 3 of the 5 core scenarios. Under line-impedance errors some baselines are more accurate; a diagnosis with the true per-line impedances shows that the larger position error comes from line-parameter mismatch. All results are from simulation.
+With only a handful of synchronized sensors in a distribution network, existing fault-location methods each fall short: data-driven methods lose accuracy when test conditions leave the training distribution, and physics-based inversion, which is insensitive to the training distribution, cannot separate sections whose responses are similar. We propose a two-stage method of data-driven screening and physics-based closed-loop verification: a neural network narrows the faulted section to two candidates, a physics-based inversion with a real-valued fault resistance verifies each candidate and estimates the position within the section, and a joint probability–residual score combines the two pieces of evidence; when no candidate explains the measurements the search is widened, and if it still fails a mismatch alarm is raised. On the IEEE 34-bus feeder (5 sensors, 30 sections), when the fault resistance leaves the training range (300–1000 Ω) our method reaches a section accuracy (judged by equivalence class) of 85.2%, against 69.6% for the best external method compared; within the training distribution it is on par with the strongest baseline (97.0% against at most 97.1%); restricting the fault resistance to a real number raises the section accuracy of the physics-based inversion by 6.6–12.4 percentage points in all 16 scenarios; and in the four fixed-tap scenarios it is 10.9–26.7 percentage points above the two-stage method of Liang et al. On the IEEE 123-bus feeder (8 sensors, 118 sections) it is significantly better than the other methods in 3 of the 5 core scenarios. Under line-impedance errors some baselines are more accurate; a diagnosis with the true per-line impedances shows that the larger position error comes from line-parameter mismatch. All results are from simulation.
 
 **Keywords:** fault location; distribution network; extremely sparse measurements; physics-based inversion; data-driven; out-of-distribution generalization
 
@@ -14,7 +14,7 @@ Distribution feeders have many sections and branches, and locating a fault by pa
 
 Existing methods fall into two families. Physics-based methods use the network model: impedance-based methods [3,4], voltage-sag and response matching [5,6], sparse recovery and compressed sensing [7,8,9], and two-stage methods that screen candidates and then run a nonlinear state estimation [10]. They do not depend on training data, but with very few sensors the responses of different sections are similar and the residual separates them poorly. Data-driven methods learn a mapping from measurements to the fault location with support vector machines and ensembles [11,12,13], convolutional networks [14,15] and graph neural networks [16,17,18]. They are accurate within the training distribution but degrade when test conditions leave it. In the papers we reviewed, the fault resistance and load level of the test set generally follow the training distribution, and extrapolation beyond the training range is rarely tested (see Section 2).
 
-The two families fail under different conditions: data-driven methods fail outside the training distribution, physics-based methods fail between sections with similar responses. We therefore propose a two-stage method in which a neural network screens the faulted section down to two candidates, a physics-based inversion with a real-valued fault resistance verifies each candidate and estimates the position within the section, and a Bayesian joint score combines the two pieces of evidence. When neither explains the measurements, the search is widened, and if it still fails a model-mismatch alarm is raised.
+The two families fail under different conditions: data-driven methods fail outside the training distribution, physics-based methods fail between sections with similar responses. We therefore propose a two-stage method in which a neural network screens the faulted section down to two candidates, a physics-based inversion with a real-valued fault resistance verifies each candidate and estimates the position within the section, and a joint probability–residual score combines the two pieces of evidence. When neither explains the measurements, the search is widened, and if it still fails a model-mismatch alarm is raised.
 
 The contributions of this paper are:
 
@@ -68,13 +68,13 @@ In the weights, $\varepsilon_r=2\%$ and $\varepsilon_a=1\%$ represent the linear
 
 ### 3.4 Stage 3: joint score, candidate expansion and alarm
 
-The score of a candidate is $S_s=\ln P(s\mid\mathbf z)-\lambda\,J_{\mathrm{pen}}(s)$ and the candidate with the largest score is chosen; $\lambda$ is fitted on a validation set by maximizing the joint posterior likelihood of the true equivalence class. Let $\theta$ be the 99th percentile of the residual $J$ when the hypothesis is correct (calibrated on the validation set). If the $J$ of both candidates exceeds $\theta$, the candidate set from stage 1 is not trustworthy, and the candidates are expanded to all sections and re-scored; if the smallest $J$ after expansion still exceeds $\theta$, a model-mismatch alarm is raised. The confidence is the probability that $\mathrm{softmax}(S)$ over the candidate pool places on the equivalence class of the chosen section. Equivalence classes are defined from physical evidence: for a true fault in $s$, if in at least half of the samples the penalized residual of section $s'$ is not larger than that of $s$ by more than 4, the two cannot be distinguished; sections that are mutually indistinguishable are connected into one class.
+The score of a candidate is $S_s=\ln P(s\mid\mathbf z)-\lambda\,J_{\mathrm{pen}}(s)$ and the candidate with the largest score is chosen; $\lambda$ is fitted on a validation set by maximizing the log-likelihood of the true equivalence class under the softmax of the combined score. The score is a heuristic fusion of the two pieces of evidence, not a strict posterior: the neural network and the physics-based residual use the same measurements, independence is not assumed, and $\lambda$ is calibrated empirically on the validation set. Let $\theta$ be the 99th percentile of the residual $J$ when the hypothesis is correct (calibrated on the validation set). If the $J$ of both candidates exceeds $\theta$, the candidate set from stage 1 is not trustworthy, and the candidates are expanded to all sections and re-scored; if the smallest $J$ after expansion still exceeds $\theta$, a model-mismatch alarm is raised. The confidence is the probability that $\mathrm{softmax}(S)$ over the candidate pool places on the equivalence class of the chosen section. Equivalence classes are defined from physical evidence: for a true fault in $s$, if in at least half of the samples the penalized residual of section $s'$ is not larger than that of $s$ by more than 4, the two cannot be distinguished; sections that are mutually indistinguishable are connected into one class.
 
 ## 4 Experimental Setup
 
 ### 4.1 Systems, sensors and data
 
-The test systems are the IEEE 34-bus feeder (30 fault sections) and the IEEE 123-bus feeder (118 fault sections; switches are modeled as short connections), simulated with OpenDSS [31]. The five sensors of IEEE 34 are at buses 814, 836, 802, 822 and 834, and the eight of IEEE 123 at buses 60, 47, 95, 1, 108, 27, 81 and 30 (Fig. 2); they were chosen by greedy forward selection on the mean location error of exhaustive physics-based inversion. Each sensor measures the three-phase voltages of its bus and the three-phase currents of one adjacent line, giving 26 complex measurements for IEEE 34 and 44 for IEEE 123. Measurement noise is 0.1% of the nominal voltage and 0.2 A for current; the disturbance is the difference of two measurements, so the noise standard deviation is multiplied by $\sqrt2$. There are 10 fault types (single-phase-to-ground, phase-to-phase, two-phase-to-ground, three-phase-to-ground), the position is uniform over the whole network, the fault resistance in the training set is log-uniform in 0.01–300 Ω and the load multiplier is 0.6–1.1. The IEEE 34 training set has 80,000 nominal-impedance samples plus 20,000 each at line-impedance scales 0.88, 0.94, 1.06 and 1.12; IEEE 123 has 120,000 plus 30,000 each. Each test scenario has 5000 samples.
+The test systems are the IEEE 34-bus feeder (30 fault sections) and the IEEE 123-bus feeder (118 fault sections; switches are modeled as short connections), simulated with OpenDSS [31]. The five sensors of IEEE 34 are at buses 814, 836, 802, 822 and 834, and the eight of IEEE 123 at buses 60, 47, 95, 1, 108, 27, 81 and 30 (Fig. 2); they were chosen by greedy forward selection on the mean location error of exhaustive physics-based inversion (difference of the distances from the substation). Each sensor measures the three-phase voltages of its bus and the three-phase currents of one adjacent line, giving 26 complex measurements for IEEE 34 and 44 for IEEE 123. Measurement noise is 0.1% of the nominal voltage and 0.2 A for current; the disturbance is the difference of two measurements, so the noise standard deviation is multiplied by $\sqrt2$. There are 10 fault types (single-phase-to-ground, phase-to-phase, two-phase-to-ground, three-phase-to-ground), the position is uniform over the whole network, the fault resistance in the training set is log-uniform in 0.01–300 Ω and the load multiplier is 0.6–1.1. The IEEE 34 training set has 80,000 nominal-impedance samples plus 20,000 each at line-impedance scales 0.88, 0.94, 1.06 and 1.12; IEEE 123 has 120,000 plus 30,000 each. Each test scenario has 5000 samples.
 
 ![Fig. 2 Topology of the test systems (rooted at the substation, horizontal axis is the distance along the feeder to the substation) and sensor locations.](figures/en/fig2.png)
 
@@ -86,11 +86,11 @@ All scenarios use the same trained model and only change the test conditions. Th
 
 ### 4.3 Compared methods
 
-There are six external methods, four published methods and two machine-learning baselines, all trained on the same training set and using the same measurements. The published methods are: (1) GCN [16], Chebyshev graph convolution, with two inputs, the “paper input” (magnitude and angle of the during-fault phasors) and the “disturbance input” (the same features as stage 1); (2) GAT [17], three layers with four attention heads restricted to physically adjacent buses, with the same two inputs; (3) block-sparse Bayesian learning [8], which takes the three-phase virtual injection current at each candidate position as the unknown and estimates the block variances by EM, choosing the block with the largest energy; the position is limited to a 10-point $\alpha$ grid, no neural network is used and line parameters are nominal; (4) the two-stage method of Liang et al. [10], linear model matching for screening followed by a nonlinear fault state estimation, which assumes exactly known regulator taps and network parameters and is therefore compared only in the fixed-tap scenarios, and which receives more measurements than our method (root-bus phasors, end-bus voltage magnitudes, load pseudo-measurements). The machine-learning baselines are (5) PCA+SVM and (6) PCA+random forest, following the comparison protocol of Chen et al. [16], with the stage-1 features standardized and reduced by PCA (99% of the variance); the SVM has an RBF kernel and, because of the cost of kernel methods, is trained on a random subset of 30,000 samples. Except for the method of Liang et al. and block-sparse Bayesian learning, all classifiers output only the section, and the fault point is taken at the section midpoint. To separate section selection from position estimation we also hand each classifier's Top-1 section to stage 2 to estimate the position within the section (“+physics location”), or feed its probability into the full procedure as stage 1 (“+our procedure”). Internal references are neural-network Top-1 followed by physics-based location (hard cascade), exhaustive physics-based inversion over all sections, and an oracle with the section known. All baselines are our reimplementations from the original papers and may differ from the original authors' code; see Table A6.
+There are six external methods, four published methods and two machine-learning baselines. GCN, GAT and the two machine-learning baselines use the same training data and measurements as stage 1; block-sparse Bayesian learning and the method of Liang et al. train no neural network, and the latter receives more measurements (see below). The published methods are: (1) GCN [16], Chebyshev graph convolution, with two inputs, the “paper input” (magnitude and angle of the during-fault phasors) and the “disturbance input” (the same features as stage 1); (2) GAT [17], three layers with four attention heads restricted to physically adjacent buses, with the same two inputs; (3) block-sparse Bayesian learning [8], which takes the three-phase virtual injection current at each candidate position as the unknown and estimates the block variances by EM, choosing the block with the largest energy; the position is limited to a 10-point $\alpha$ grid, no neural network is used and line parameters are nominal; (4) the two-stage method of Liang et al. [10], linear model matching for screening followed by a nonlinear fault state estimation, which assumes exactly known regulator taps and network parameters and is therefore compared only in the fixed-tap scenarios, and which receives more measurements than our method (root-bus phasors, end-bus voltage magnitudes, load pseudo-measurements). The machine-learning baselines are (5) PCA+SVM and (6) PCA+random forest, following the comparison protocol of Chen et al. [16], with the stage-1 features standardized and reduced by PCA (99% of the variance); the SVM has an RBF kernel and, because of the cost of kernel methods, is trained on a random subset of 30,000 samples. Except for the method of Liang et al. and block-sparse Bayesian learning, all classifiers output only the section, and the fault point is taken at the section midpoint. To separate section selection from position estimation we also hand each classifier's Top-1 section to stage 2 to estimate the position within the section (“+physics location”), or feed its probability into the full procedure as stage 1 (“+our procedure”). Internal references are neural-network Top-1 followed by physics-based location (hard cascade), exhaustive physics-based inversion over all sections, and an oracle with the section known. All baselines are our reimplementations from the original papers and may differ from the original authors' code; see Table A6.
 
 ### 4.4 Metrics and statistics
 
-Section accuracy is judged at the level of equivalence classes (22 classes for IEEE 34, 64 for IEEE 123; the classes are defined from physical evidence and fixed so that all methods are scored the same way), and exact section accuracy is also reported. The location error is the absolute difference (km) between the predicted and true fault points measured along the feeder from the substation; we report the mean and, where useful, the median, P90 and quantiles. The correction rate CR and false-correction rate FCR are defined relative to the correctness of the stage-1 Top-1. Training randomness is measured with several seeds: on IEEE 34, five seeds for our method and GCN and three for GAT and the PCA baselines (block-sparse Bayesian learning has no randomness and the method of Liang et al. is a single run); on IEEE 123 five seeds for our method, three for GCN and single runs for the other baselines; results are reported as mean ± standard deviation; a difference of means is called significant only if it exceeds twice the larger standard deviation.
+Section accuracy is judged at the level of equivalence classes (22 classes for IEEE 34, 64 for IEEE 123; the classes are defined from physical evidence and fixed so that all methods are scored the same way), and exact section accuracy is also reported. The location error is the shortest path distance (km) along the feeder between the predicted and the true fault point, so a prediction on another branch includes the path through the branching point; we report the mean and, where useful, the median, P90 and quantiles. The correction rate CR and false-correction rate FCR are defined relative to the correctness of the stage-1 Top-1. Training randomness is measured with several seeds: on IEEE 34, five seeds for our method and GCN and three for GAT and the PCA baselines (block-sparse Bayesian learning has no randomness and the method of Liang et al. is a single run); on IEEE 123 five seeds for our method, three for GCN and single runs for the other baselines; results are reported as mean ± standard deviation; a difference of means is called significant only if it exceeds twice the larger standard deviation.
 
 ## 5 Results
 
@@ -100,7 +100,7 @@ This section is organized by question: each subsection answers one question, cla
 
 **Table 2 Main comparison on IEEE 34: class accuracy (%, mean ± standard deviation). For GCN and GAT the input with the higher accuracy in each scenario is shown (P: paper input, D: disturbance input); the best in each row is in bold**
 
-| Scenario | Ours | GCN | GAT | Block-sparse Bayesian | PCA+SVM | PCA+RF |
+| Scenario | Ours | GCN | GAT | Simplified block-sparse Bayesian | PCA+SVM | PCA+RF |
 |:--|---:|---:|---:|---:|---:|---:|
 | In-domain | 97.0±0.1 | **97.1±0.0** (D) | 96.1±0.1 (D) | 79.0 | 92.7±0.1 | 93.2±0.1 |
 | Load shift | **94.6±0.3** | 93.5±0.6 (D) | 92.2±0.6 (D) | 78.5 | 87.8±0.3 | 86.8±0.3 |
@@ -108,13 +108,25 @@ This section is organized by question: each subsection answers one question, cla
 | Noise ×3 | 92.4±0.4 | **92.9±0.2** (P) | 91.4±0.1 (P) | 47.3 | 86.6±0.3 | 85.0±0.2 |
 | Individual line impedance ±20% | 89.9±0.1 | **90.4±0.2** (P) | 90.2±0.1 (P) | 75.2 | 88.3±0.2 | 88.4±0.2 |
 
+**Table 2b Paired comparison of our method with the other method of highest mean class accuracy in each scenario (seed 0, the same 5,000 test samples): accuracy of ours / the other (%), difference (percentage points) with the paired-bootstrap 95% confidence interval, and the exact McNemar p value; class accuracy on the left, exact section accuracy on the right**
+
+| Scenario | Other method | Class acc. ours/other | Difference [95% CI] | p | Exact acc. ours/other | Difference [95% CI] | p |
+|:--|---:|---:|---:|---:|---:|---:|---:|
+| In-domain | GCN (disturbance input) | 97.2 / 97.2 | -0.1 [-0.5, +0.3] | 0.842 | 94.7 / 94.0 | +0.7 [+0.2, +1.2] | 0.010 |
+| Load shift | GCN (disturbance input) | 94.2 / 93.7 | +0.5 [-0.2, +1.2] | 0.168 | 91.1 / 90.1 | +1.0 [+0.2, +1.8] | 0.011 |
+| High resistance | GAT (disturbance input) | 85.8 / 69.5 | +16.3 [+14.9, +17.6] | <0.001 | 82.9 / 64.3 | +18.6 [+17.4, +19.9] | <0.001 |
+| Noise ×3 | GCN (paper input) | 91.7 / 93.1 | -1.4 [-2.3, -0.5] | 0.002 | 88.6 / 89.6 | -1.0 [-2.0, -0.1] | 0.031 |
+| Individual line impedance ±20% | GCN (paper input) | 90.0 / 90.6 | -0.5 [-1.3, +0.2] | 0.168 | 87.4 / 87.8 | -0.3 [-1.1, +0.5] | 0.456 |
+
 Against the best of the other methods in each scenario (a difference counts as significant only if it exceeds twice the larger standard deviation), our method is significantly higher in 1 scenario(s) (High resistance), not significantly different in 3 (In-domain, Load shift, Noise ×3) and significantly lower in 1 (Individual line impedance ±20%). The gap is largest when the fault resistance leaves the training range (300–1000 Ω): our method reaches 85.2%, the best of the other methods, GAT (disturbance input), 69.6%. In-domain, ours is 97.0%, 0.1 percentage points below the strongest baseline (GCN (disturbance input), 97.1%).
+
+Table 2b applies paired tests on the same seed-0 test samples (the other method is the best one of each scenario). For class accuracy, our method is significantly higher in 1 scenario(s) (High resistance +16.3 percentage points), significantly lower in 1 (Noise ×3 -1.4) and not significantly different in the other 3; for exact section accuracy it is significantly higher in 3 (In-domain +0.7, Load shift +1.0, High resistance +18.6) and significantly lower in 1 (Noise ×3 -1.0). A paired test contains only the randomness of the test samples, while the judgement by the standard deviation across seeds contains only the randomness of training; the two disagree in Noise ×3, Individual line impedance ±20%, and these scenarios are all treated as our method not being better than the other.
 
 When the line impedances are in error, baselines such as GCN are not below our method: under individual line impedance ±20% the GCN with the paper input is 0.5 percentage points higher; under global line-impedance errors of ±10% (Table A5) the gap is 1.4–2.6 points. This is because such errors make the nominal response library of stage 2 mismatched, so the section decision relies mainly on stage 1, and the baselines are trained on the same data as stage 1; Section 5.6 diagnoses the source of the loss.
 
 **Table 3 Class accuracy (%, seed 0) of the IEEE 34 in-domain test set by fault type and fault position (GCN with the disturbance input, GAT with the disturbance input)**
 
-| Group | Samples | Ours | GCN | GAT | Block-sparse Bayesian | PCA+SVM | PCA+RF |
+| Group | Samples | Ours | GCN | GAT | Simplified block-sparse Bayesian | PCA+SVM | PCA+RF |
 |:--|---:|---:|---:|---:|---:|---:|---:|
 | Fault type SLG | 2677 | 97.1 | **97.3** | 95.8 | 77.5 | 92.0 | 92.1 |
 | Fault type LL | 1030 | **97.1** | 96.6 | 96.0 | 81.9 | 93.8 | 95.2 |
@@ -138,21 +150,21 @@ Fig. 3(b) shows the sensitivity to measurement noise: at noise multipliers ×0.5
 
 ### 5.3 How far is the predicted fault point from the true one?
 
-![Fig. 4 Cumulative distribution of the location error on IEEE 34: (left) in-domain, (right) high resistance.](figures/en/fig4.png)
+![Fig. 4 Cumulative distribution of the location error (shortest path along the feeder) on IEEE 34: (left) in-domain, (right) high resistance.](figures/en/fig4.png)
 
-*Fig. 4 Cumulative distribution of the location error on IEEE 34: (left) in-domain, (right) high resistance.*
+*Fig. 4 Cumulative distribution of the location error (shortest path along the feeder) on IEEE 34: (left) in-domain, (right) high resistance.*
 
-**Table 4 Mean location error on IEEE 34 (km). The classifiers output only the section; the format is “section midpoint / followed by the stage-2 physics-based location” (inputs of GCN and GAT as in Table 2); the smallest in each row is in bold**
+**Table 4 Mean location error on IEEE 34 (km; shortest path along the feeder between the predicted and the true fault point, seed 0). The classifiers output only the section; the format is “section midpoint / followed by the stage-2 physics-based location” (inputs of GCN and GAT as in Table 2); the smallest in each row is in bold**
 
-| Scenario | Ours | Block-sparse Bayesian | GCN | GAT | PCA+SVM | PCA+RF |
+| Scenario | Ours | Simplified block-sparse Bayesian | GCN | GAT | PCA+SVM | PCA+RF |
 |:--|---:|---:|---:|---:|---:|---:|
-| In-domain | **0.44** | 4.95 | 2.08 / **0.44** | 2.11 / 0.46 | 2.29 / 0.52 | 2.26 / 0.50 |
-| Load shift | **0.64** | 4.43 | 2.12 / 0.66 | 2.21 / 0.65 | 2.62 / 0.97 | 2.80 / 1.02 |
-| High resistance | **1.36** | 28.07 | 5.97 / 4.67 | 5.06 / 3.63 | 7.54 / 5.76 | 8.98 / 7.14 |
-| Noise ×3 | **0.53** | 19.30 | 2.36 / 0.67 | 2.41 / 0.64 | 2.79 / 0.89 | 2.94 / 1.02 |
-| Individual line impedance ±20% | **0.98** | 5.74 | 2.32 / 0.99 | 2.37 / 1.01 | 2.47 / 1.02 | 2.42 / 1.00 |
+| In-domain | **0.45** | 4.99 | 2.10 / 0.46 | 2.14 / 0.48 | 2.33 / 0.54 | 2.29 / 0.53 |
+| Load shift | **0.67** | 4.46 | 2.14 / 0.69 | 2.26 / 0.68 | 2.70 / 1.01 | 2.88 / 1.07 |
+| High resistance | **1.45** | 28.82 | 8.06 / 6.39 | 5.60 / 3.89 | 8.12 / 6.18 | 11.10 / 9.04 |
+| Noise ×3 | **0.56** | 19.46 | 2.39 / 0.70 | 2.42 / 0.68 | 2.84 / 0.94 | 3.12 / 1.14 |
+| Individual line impedance ±20% | **1.00** | 5.77 | 2.36 / 1.01 | 2.40 / 1.04 | 2.51 / 1.05 | 2.48 / 1.03 |
 
-The classifier baselines output only the section and the fault point is taken at the section midpoint, so their location error is much larger (2.08–2.29 km in-domain); once their Top-1 section is handed to stage 2 to estimate the position within the section, the in-domain error falls to 0.44–0.52 km, close to our method (0.44 km), which shows that the accuracy of the position within a section comes mainly from the physics-based inversion. Under high resistance the classifiers followed by physics-based location still have 3.63–9.15 km against 1.36 km for our method, the difference coming from wrongly selected sections (Section 5.4). Block-sparse Bayesian learning estimates the position itself, but it is limited by the α grid and its error is large when it selects the wrong section (Fig. 4, Table 4).
+The classifier baselines output only the section and the fault point is taken at the section midpoint, so their location error is much larger (2.10–2.33 km in-domain); once their Top-1 section is handed to stage 2 to estimate the position within the section, the in-domain error falls to 0.46–0.54 km, close to our method (0.45 km), which shows that the accuracy of the position within a section comes mainly from the physics-based inversion. Under high resistance the classifiers followed by physics-based location still have 3.89–11.65 km against 1.45 km for our method, the difference coming from wrongly selected sections (Section 5.4). Block-sparse Bayesian learning estimates the position itself, but it is limited by the α grid and its error is large when it selects the wrong section (Fig. 4, Table 4).
 
 ### 5.4 What does each component contribute?
 
@@ -167,7 +179,7 @@ The classifier baselines output only the section and the fault point is taken at
 | Fixed taps: in-domain | 85.1 | **93.3** | 89.9 | 93.6 | **94.5** | 94.0 |
 | Fixed taps: load shift | 81.4 | **93.9** | 90.1 | 87.7 | 91.9 | **92.6** |
 
-Table 5 is a controlled ablation of the physics model. Restricting the fault resistance to a real number raises the class accuracy of the exhaustive physics-based inversion in all 16 evaluated scenarios (including those in the appendix), by 6.6–12.4 percentage points; the joint decision improves in 13 scenarios and the location error decreases in 15. The real gain matters where the pre-fault voltage deviates from the nominal value: in the high-resistance and fixed-tap scenarios, removing the gain lowers the exhaustive inversion by 0.9–5.3 percentage points; its effect on the class accuracy of the joint decision is inconsistent, and its benefit shows mainly in the exhaustive inversion and in the location error. Under global line-impedance errors of ±10% the constraint brings no gain to the joint decision.
+Table 5 is a controlled ablation of the physics model. Restricting the fault resistance to a real number raises the class accuracy of the exhaustive physics-based inversion in all 16 evaluated scenarios (including those in the appendix), by 6.6–12.4 percentage points; the joint decision improves in 13 scenarios. The real gain matters where the pre-fault voltage deviates from the nominal value: in the high-resistance and fixed-tap scenarios, removing the gain lowers the exhaustive inversion by 0.9–5.3 percentage points; its effect on the class accuracy of the joint decision is inconsistent, and its benefit shows mainly in the exhaustive inversion and in the location error. Under global line-impedance errors of ±10% the constraint brings no gain to the joint decision.
 
 **Table 6 Each classifier plugged in as stage 1 of our procedure (IEEE 34, seed 0; class accuracy %)**
 
@@ -195,7 +207,7 @@ The premise of the joint decision is that the errors of the two do not coincide 
 | Fixed taps: high resistance | **85.3±0.5** | 58.7 | 64.7±4.1 (D) | 51.9±0.3 |
 | Fixed taps: noise ×3 | **92.0±0.3** | 78.1 | 90.2±0.4 (P) | 84.7±0.8 |
 
-Location error (mean): Fixed taps: in-domain: ours 0.45 km, Liang 0.91 km; Fixed taps: load shift: ours 0.63 km, Liang 1.02 km; Fixed taps: high resistance: ours 1.28 km, Liang 4.36 km; Fixed taps: noise ×3: ours 0.51 km, Liang 1.36 km.
+Location error (mean): Fixed taps: in-domain: ours 0.47 km, Liang 1.02 km; Fixed taps: load shift: ours 0.65 km, Liang 1.04 km; Fixed taps: high resistance: ours 1.33 km, Liang 4.44 km; Fixed taps: noise ×3: ours 0.54 km, Liang 1.44 km.
 
 The method of Liang et al. assumes exactly known regulator taps and network parameters and receives root-bus phasors, end-bus voltage magnitudes and load pseudo-measurements, more than our method, so it is compared only in the four fixed-tap scenarios. Our method is 10.9–26.7 percentage points higher in these four scenarios and also has the smaller location error. Note that this is our reimplementation from the paper, whose stage 1 is below the reported values (Table A3), so the original method may be underestimated.
 
@@ -213,9 +225,9 @@ When each line impedance deviates independently by ±20%, the class accuracy of 
 
 ### 5.7 Do the conclusions hold on the IEEE 123-bus system, and what is the computation cost?
 
-**Table 9 Comparison on IEEE 123 (class accuracy %; GCN 3 seeds (2 for the individual-line scenario), GAT with the disturbance input only, block-sparse Bayesian on 1000 samples per scenario, the rest seed 0); the best in each row is in bold**
+**Table 9 Comparison on IEEE 123 (class accuracy %; GCN 3 seeds (2 for the individual-line scenario), GAT with the disturbance input only, simplified block-sparse Bayesian on 1000 samples per scenario, the rest seed 0); the best in each row is in bold**
 
-| Scenario | Ours | GCN | GAT | Block-sparse Bayesian | PCA+SVM | PCA+RF |
+| Scenario | Ours | GCN | GAT | Simplified block-sparse Bayesian | PCA+SVM | PCA+RF |
 |:--|---:|---:|---:|---:|---:|---:|
 | In-domain | **87.4±0.2** | 85.8±0.3 (D) | 85.0 (D) | 22.3 | 70.7 | 81.9 |
 | Load shift | **87.5±0.3** | 85.4±0.3 (D) | 83.7 (D) | 23.3 | 71.9 | 80.3 |
@@ -233,7 +245,7 @@ On IEEE 123 (118 sections, 8 sensors), our method is significantly higher in 3 c
 
 ## 7 Conclusion
 
-For fault location in distribution networks with extremely sparse measurements, this paper proposed a two-stage method of neural-network screening, physics-based verification and Bayesian joint scoring, with candidate expansion and a mismatch alarm. In simulations on IEEE 34 and IEEE 123, when the fault resistance leaves the training range the section accuracy of our method is clearly higher than that of the compared data-driven, sparse-recovery and two-stage methods (85.2% on IEEE 34 against at most 69.6%), and within the training distribution it is on par with the strongest baseline; the accuracy of the position within a section comes from the physics-based inversion, and restricting the fault resistance to a real number raises the section accuracy of the physics-based inversion by 6.6–12.4 percentage points in all 16 scenarios. The main limitations are that some baselines are higher when line impedances are in error and that there is no field validation. Future work includes combining the method with line-parameter identification, topology changes and distributed generation, and validation with field data.
+For fault location in distribution networks with extremely sparse measurements, this paper proposed a two-stage method of neural-network screening, physics-based verification and joint probability–residual scoring, with candidate expansion and a mismatch alarm. In simulations on IEEE 34 and IEEE 123, when the fault resistance leaves the training range the section accuracy of our method is clearly higher than that of the compared data-driven, sparse-recovery and two-stage methods (85.2% on IEEE 34 against at most 69.6%), and within the training distribution it is on par with the strongest baseline; the accuracy of the position within a section comes from the physics-based inversion, and restricting the fault resistance to a real number raises the section accuracy of the physics-based inversion by 6.6–12.4 percentage points in all 16 scenarios. The main limitations are that some baselines are higher when line impedances are in error and that there is no field validation. Future work includes combining the method with line-parameter identification, topology changes and distributed generation, and validation with field data.
 
 ## Data and code availability
 
@@ -257,12 +269,12 @@ The simulations use the public OpenDSS IEEE 34- and IEEE 123-bus test feeders; t
 | Equivalence classes | Definition | s and s′ are indistinguishable if in at least 50% of the samples the penalized residual of s′ is not larger than that of s by more than 4; mutually indistinguishable sections are connected into classes (22 for IEEE 34, 64 for IEEE 123; fixed) |
 | GCN | Structure and training | Bus graph (nearest Kn buses kept, Kn=6 for IEEE 34, 12 for IEEE 123); three Chebyshev layers (orders 3, 4, 5, 128 filters each); fully connected 512-256, dropout 0.5; AdamW, learning rate 1e-3 (OneCycle), batch 128, 6000 steps (IEEE 34), 8000 steps (IEEE 123) |
 | GAT | Structure and training | Three layers with four attention heads (128 dimensions per layer), attention restricted to physically adjacent buses (with self-loops); followed by the same two fully connected layers; trained like the GCN |
-| Block-sparse Bayesian | Dictionary and iterations | Dictionary of three-phase injection-current responses of each section at α = 0.05–0.95 (10 points), block size equal to the number of phases; 60 EM iterations; noise variance weighted as in stage 2; the block with the largest posterior energy is chosen |
+| Simplified block-sparse Bayesian | Dictionary and iterations | Dictionary of three-phase injection-current responses of each section at α = 0.05–0.95 (10 points), block size equal to the number of phases; 60 EM iterations; noise variance weighted as in stage 2; the block with the largest posterior energy is chosen |
 | PCA+SVM, PCA+RF | Settings | Stage-1 features standardized, PCA keeps 99% of the variance; two noise draws per training sample; SVM with RBF kernel (C=10, gamma=scale) on a 30,000-sample subset, decision function mapped to probabilities by a single temperature; random forest with 150 trees and at least 3 samples per leaf |
 
 **Table A2 Exact section accuracy / equivalence-class accuracy (%, IEEE 34, seed 0)**
 
-| Scenario | Ours | GCN (paper input) | GCN (disturbance input) | GAT (paper input) | GAT (disturbance input) | Block-sparse Bayesian | PCA+SVM | PCA+RF |
+| Scenario | Ours | GCN (paper input) | GCN (disturbance input) | GAT (paper input) | GAT (disturbance input) | Simplified block-sparse Bayesian | PCA+SVM | PCA+RF |
 |:--|---:|---:|---:|---:|---:|---:|---:|---:|
 | In-domain | 94.7 / 97.2 | 93.4 / 96.5 | 94.1 / 97.1 | 91.7 / 95.0 | 92.7 / 96.0 | 76.0 / 79.0 | 89.7 / 92.7 | 90.1 / 93.1 |
 | Load shift | 91.1 / 94.2 | 85.4 / 88.7 | 90.3 / 93.7 | 87.6 / 90.2 | 89.6 / 92.7 | 76.0 / 78.5 | 84.3 / 87.5 | 83.9 / 87.0 |
@@ -274,7 +286,7 @@ The simulations use the public OpenDSS IEEE 34- and IEEE 123-bus test feeders; t
 
 **Table A7a Full version of the main comparison: class accuracy (%, mean ± standard deviation; IEEE 34)**
 
-| Scenario | Ours | GCN (paper input) | GCN (disturbance input) | GAT (paper input) | GAT (disturbance input) | Block-sparse Bayesian | PCA+SVM | PCA+RF |
+| Scenario | Ours | GCN (paper input) | GCN (disturbance input) | GAT (paper input) | GAT (disturbance input) | Simplified block-sparse Bayesian | PCA+SVM | PCA+RF |
 |:--|---:|---:|---:|---:|---:|---:|---:|---:|
 | In-domain | 97.0±0.1 | 96.6±0.1 | **97.1±0.0** | 94.9±0.1 | 96.1±0.1 | 79.0 | 92.7±0.1 | 93.2±0.1 |
 | Load shift | **94.6±0.3** | 88.4±1.0 | 93.5±0.6 | 91.4±1.0 | 92.2±0.6 | 78.5 | 87.8±0.3 | 86.8±0.3 |
@@ -284,21 +296,21 @@ The simulations use the public OpenDSS IEEE 34- and IEEE 123-bus test feeders; t
 | Line impedance −10% | 94.1±0.3 | 95.6±0.1 | **96.7±0.1** | 92.9±0.2 | 95.4±0.1 | 71.4 | 89.0±0.2 | 88.7±0.1 |
 | Individual line impedance ±20% | 89.9±0.1 | **90.4±0.2** | 88.3±0.1 | 90.2±0.1 | 89.0±0.1 | 75.2 | 88.3±0.2 | 88.4±0.2 |
 
-**Table A7b Mean location error (km): classifiers as “section midpoint / followed by physics-based location” (IEEE 34)**
+**Table A7b Mean location error (km, shortest path along the feeder, seed 0): classifiers as “section midpoint / followed by physics-based location” (IEEE 34)**
 
-| Scenario | Ours | GCN (paper input) | GCN (disturbance input) | GAT (paper input) | GAT (disturbance input) | Block-sparse Bayesian | PCA+SVM | PCA+RF |
+| Scenario | Ours | GCN (paper input) | GCN (disturbance input) | GAT (paper input) | GAT (disturbance input) | Simplified block-sparse Bayesian | PCA+SVM | PCA+RF |
 |:--|---:|---:|---:|---:|---:|---:|---:|---:|
-| In-domain | 0.44 | 2.12 / 0.45 | 2.08 / 0.44 | 2.22 / 0.51 | 2.11 / 0.46 | 4.95 | 2.29 / 0.52 | 2.26 / 0.50 |
-| Load shift | 0.64 | 2.70 / 1.19 | 2.12 / 0.66 | 2.55 / 0.95 | 2.21 / 0.65 | 4.43 | 2.62 / 0.97 | 2.80 / 1.02 |
-| High resistance | 1.36 | 9.91 / 8.35 | 5.97 / 4.67 | 10.71 / 9.15 | 5.06 / 3.63 | 28.07 | 7.54 / 5.76 | 8.98 / 7.14 |
-| Noise ×3 | 0.53 | 2.36 / 0.67 | 2.44 / 0.68 | 2.41 / 0.64 | 2.47 / 0.76 | 19.30 | 2.79 / 0.89 | 2.94 / 1.02 |
-| Line impedance +10% | 0.73 | 2.17 / 0.77 | 2.08 / 0.73 | 2.23 / 0.79 | 2.11 / 0.74 | 5.00 | 2.30 / 0.82 | 2.33 / 0.84 |
-| Line impedance −10% | 0.84 | 2.18 / 0.84 | 2.10 / 0.80 | 2.33 / 0.91 | 2.13 / 0.82 | 6.15 | 2.50 / 0.96 | 2.42 / 0.92 |
-| Individual line impedance ±20% | 0.98 | 2.32 / 0.99 | 2.35 / 1.02 | 2.37 / 1.01 | 2.33 / 0.99 | 5.74 | 2.47 / 1.02 | 2.42 / 1.00 |
+| In-domain | 0.45 | 2.13 / 0.47 | 2.10 / 0.46 | 2.24 / 0.54 | 2.14 / 0.48 | 4.99 | 2.33 / 0.54 | 2.29 / 0.53 |
+| Load shift | 0.67 | 2.80 / 1.32 | 2.14 / 0.69 | 2.58 / 0.99 | 2.26 / 0.68 | 4.46 | 2.70 / 1.01 | 2.88 / 1.07 |
+| High resistance | 1.45 | 13.24 / 11.37 | 8.06 / 6.39 | 13.56 / 11.65 | 5.60 / 3.89 | 28.82 | 8.12 / 6.18 | 11.10 / 9.04 |
+| Noise ×3 | 0.56 | 2.39 / 0.70 | 2.40 / 0.70 | 2.42 / 0.68 | 2.53 / 0.80 | 19.46 | 2.84 / 0.94 | 3.12 / 1.14 |
+| Line impedance +10% | 0.75 | 2.23 / 0.80 | 2.15 / 0.75 | 2.26 / 0.82 | 2.18 / 0.77 | 5.03 | 2.38 / 0.86 | 2.40 / 0.88 |
+| Line impedance −10% | 0.85 | 2.22 / 0.86 | 2.14 / 0.81 | 2.35 / 0.93 | 2.21 / 0.83 | 6.20 | 2.57 / 0.99 | 2.54 / 0.95 |
+| Individual line impedance ±20% | 1.00 | 2.36 / 1.01 | 2.44 / 1.06 | 2.40 / 1.04 | 2.40 / 1.02 | 5.77 | 2.51 / 1.05 | 2.48 / 1.03 |
 
 **Table A5 Scenarios outside the core set (IEEE 34, class accuracy %)**
 
-| Scenario | Ours | GCN (paper input) | GCN (disturbance input) | GAT (paper input) | GAT (disturbance input) | Block-sparse Bayesian | PCA+SVM | PCA+RF |
+| Scenario | Ours | GCN (paper input) | GCN (disturbance input) | GAT (paper input) | GAT (disturbance input) | Simplified block-sparse Bayesian | PCA+SVM | PCA+RF |
 |:--|---:|---:|---:|---:|---:|---:|---:|---:|
 | Line impedance +10% | 95.1±0.1 | 95.7±0.1 | **96.5±0.0** | 93.8±0.1 | 95.4±0.3 | 76.8 | 91.1±0.1 | 90.5±0.1 |
 | Line impedance −10% | 94.1±0.3 | 95.6±0.1 | **96.7±0.1** | 92.9±0.2 | 95.4±0.1 | 71.4 | 89.0±0.2 | 88.7±0.1 |
@@ -380,7 +392,7 @@ Stage 1 is below the paper (mean absolute deviation 14.2 percentage points); the
 |:--|:--|
 | GCN | Reimplemented from Chen et al.: bus graph (nearest Kn distances per bus, Gaussian weights), Chebyshev convolutions; classes are fault sections (fault buses in the original); the paper input needs pre-fault phasors, obtained by regenerating the data with the same parameters |
 | GAT | Reimplemented from Lingyu Liang et al.: multi-head graph attention restricted to physically adjacent buses; inputs and training as for the GCN |
-| Block-sparse Bayesian | Reimplemented and adapted from the idea of Jiang et al.: block-sparse Bayesian learning with three-phase virtual injection currents as unknowns and a dictionary of nominal-parameter responses of each section at 10 positions. Differences from the original: the original takes node injections as unknowns and uses a shared within-block correlation matrix, whereas this reimplementation uses positions within sections and independent blocks; the position is limited to a 10-point alpha grid, so its location error includes the grid error; no neural network |
+| Simplified block-sparse Bayesian | Reimplemented and adapted from the idea of Jiang et al.: block-sparse Bayesian learning with three-phase virtual injection currents as unknowns and a dictionary of nominal-parameter responses of each section at 10 positions. Differences from the original: the original takes node injections as unknowns and uses a shared within-block correlation matrix, whereas this reimplementation uses positions within sections and independent blocks; the position is limited to a 10-point alpha grid, so its location error includes the grid error; no neural network |
 | Liang two-stage | Reimplemented from the paper, fidelity in Table A3; assumes exactly known taps and network parameters and receives root-bus phasors, end-bus voltage magnitudes and load pseudo-measurements, more than our method |
 | PCA+SVM / PCA+RF | Following the comparison protocol of Chen et al.; inputs are the stage-1 features of our method; the SVM uses only a 30,000-sample training subset because of its cost |
 

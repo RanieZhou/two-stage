@@ -7,6 +7,14 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 R34, R123 = ROOT / "results/improved/ieee34", ROOT / "results/improved/ieee123"
 J = lambda p: json.load(open(p))
+_pe = {}
+
+
+def pe(s, key):
+    """种子 0 的测距误差均值（km，沿馈线最短路径距离），由 analyze_path_error.py 统计。"""
+    if not _pe:
+        _pe.update(J(R34 / "path_error.json"))
+    return _pe[s][key]["mean"]
 
 K = "本方案(联合打分+候选扩展)"
 NN, PH, OR = "基准1 硬串联", "基准3 物理穷举", "基准4 Oracle"
@@ -21,7 +29,7 @@ SC_EN = {"域内": "In-domain", "负荷偏移": "Load shift", "高阻外推": "H
 # 方法键 → (中文名, 英文名)
 METHODS = [("ours", "本方法", "Ours"), ("gcn_p", "GCN（论文输入）", "GCN (paper input)"), ("gcn_d", "GCN（突变量输入）", "GCN (disturbance input)"),
            ("gat_p", "GAT（论文输入）", "GAT (paper input)"), ("gat_d", "GAT（突变量输入）", "GAT (disturbance input)"),
-           ("bsbl", "块稀疏贝叶斯", "Block-sparse Bayesian"), ("svm", "PCA+SVM", "PCA+SVM"), ("rf", "PCA+随机森林", "PCA+RF")]
+           ("bsbl", "简化块稀疏贝叶斯", "Simplified block-sparse Bayesian"), ("svm", "PCA+SVM", "PCA+SVM"), ("rf", "PCA+随机森林", "PCA+RF")]
 
 def sc(d, s):
     return s if d.L == "zh" else SC_EN[s]
@@ -132,7 +140,7 @@ def appendix_hyper(d):
         [t("等价类", "Equivalence classes"), t("定义", "Definition"), t("不少于 50% 的样本中 s′ 的惩罚残差不比 s 大出 4，则 s 与 s′ 不可区分；双向不可区分的区段连通成类（IEEE 34 为 22 类，IEEE 123 为 64 类，固定）", "s and s′ are indistinguishable if in at least 50% of the samples the penalized residual of s′ is not larger than that of s by more than 4; mutually indistinguishable sections are connected into classes (22 for IEEE 34, 64 for IEEE 123; fixed)")],
         [t("GCN", "GCN"), t("结构与训练", "Structure and training"), t("母线图（保留每个母线最近的 Kn 个，IEEE 34 为 6，IEEE 123 为 12）；3 层切比雪夫卷积（阶数 3、4、5，各 128 个滤波器）；全连接 512-256，dropout 0.5；AdamW，学习率 1e-3（OneCycle），批量 128，IEEE 34 为 6000 步，IEEE 123 为 8000 步", "Bus graph (nearest Kn buses kept, Kn=6 for IEEE 34, 12 for IEEE 123); three Chebyshev layers (orders 3, 4, 5, 128 filters each); fully connected 512-256, dropout 0.5; AdamW, learning rate 1e-3 (OneCycle), batch 128, 6000 steps (IEEE 34), 8000 steps (IEEE 123)")],
         [t("GAT", "GAT"), t("结构与训练", "Structure and training"), t("3 层 4 头图注意力（每层 128 维），注意力限于物理相邻母线（含自环）；其后同样接两层全连接；训练同 GCN", "Three layers with four attention heads (128 dimensions per layer), attention restricted to physically adjacent buses (with self-loops); followed by the same two fully connected layers; trained like the GCN")],
-        [t("块稀疏贝叶斯", "Block-sparse Bayesian"), t("字典与迭代", "Dictionary and iterations"), t("字典为各区段在 α = 0.05–0.95（10 点）的三相注入电流响应，块大小为区段相数；EM 迭代 60 次；量测噪声方差取与阶段二相同的加权；取后验能量最大的块", "Dictionary of three-phase injection-current responses of each section at α = 0.05–0.95 (10 points), block size equal to the number of phases; 60 EM iterations; noise variance weighted as in stage 2; the block with the largest posterior energy is chosen")],
+        [t("简化块稀疏贝叶斯", "Simplified block-sparse Bayesian"), t("字典与迭代", "Dictionary and iterations"), t("字典为各区段在 α = 0.05–0.95（10 点）的三相注入电流响应，块大小为区段相数；EM 迭代 60 次；量测噪声方差取与阶段二相同的加权；取后验能量最大的块", "Dictionary of three-phase injection-current responses of each section at α = 0.05–0.95 (10 points), block size equal to the number of phases; 60 EM iterations; noise variance weighted as in stage 2; the block with the largest posterior energy is chosen")],
         [t("PCA+SVM、PCA+随机森林", "PCA+SVM, PCA+RF"), t("设置", "Settings"), t("阶段一特征标准化后 PCA 保留 99% 方差；每个训练样本叠加噪声 2 次；SVM 为 RBF 核（C=10，gamma=scale），3 万个训练子样本，决策函数经单一温度标定为概率；随机森林 150 棵树，叶节点最少 3 个样本", "Stage-1 features standardized, PCA keeps 99% of the variance; two noise draws per training sample; SVM with RBF kernel (C=10, gamma=scale) on a 30,000-sample subset, decision function mapped to probabilities by a single temperature; random forest with 150 trees and at least 3 samples per leaf")],
     ]
     d.table("A1", "超参数汇总", "Hyperparameters", [t("模块", "Module"), t("项目", "Item"), t("取值", "Value")], rows, [":--"] * 3)
@@ -215,7 +223,7 @@ def appendix_baselines(d):
     rows = [
         ["GCN", t("按 Chen 等的描述复现：母线图（每个母线保留最近的 Kn 个距离，高斯核权重），切比雪夫卷积，类别为故障区段（原文为故障母线）；论文输入需要故障前相量，由相同参数重新生成数据得到", "Reimplemented from Chen et al.: bus graph (nearest Kn distances per bus, Gaussian weights), Chebyshev convolutions; classes are fault sections (fault buses in the original); the paper input needs pre-fault phasors, obtained by regenerating the data with the same parameters")],
         ["GAT", t("按 Lingyu Liang 等的描述复现：多头图注意力；注意力限于物理相邻母线；输入与训练同 GCN", "Reimplemented from Lingyu Liang et al.: multi-head graph attention restricted to physically adjacent buses; inputs and training as for the GCN")],
-        [t("块稀疏贝叶斯", "Block-sparse Bayesian"), t("按 Jiang 等的思路复现并适配：以三相虚拟注入电流为未知量的块稀疏贝叶斯学习，字典取名义参数下各区段在 10 个位置上的响应；与原文的差别：原文以节点注入为未知量并使用共享的块内相关矩阵，本复现取区段内位置且各块独立；位置受 α 网格限制，因此其测距误差包含网格误差；不使用神经网络", "Reimplemented and adapted from the idea of Jiang et al.: block-sparse Bayesian learning with three-phase virtual injection currents as unknowns and a dictionary of nominal-parameter responses of each section at 10 positions. Differences from the original: the original takes node injections as unknowns and uses a shared within-block correlation matrix, whereas this reimplementation uses positions within sections and independent blocks; the position is limited to a 10-point alpha grid, so its location error includes the grid error; no neural network")],
+        [t("简化块稀疏贝叶斯", "Simplified block-sparse Bayesian"), t("按 Jiang 等的思路复现并适配：以三相虚拟注入电流为未知量的块稀疏贝叶斯学习，字典取名义参数下各区段在 10 个位置上的响应；与原文的差别：原文以节点注入为未知量并使用共享的块内相关矩阵，本复现取区段内位置且各块独立；位置受 α 网格限制，因此其测距误差包含网格误差；不使用神经网络", "Reimplemented and adapted from the idea of Jiang et al.: block-sparse Bayesian learning with three-phase virtual injection currents as unknowns and a dictionary of nominal-parameter responses of each section at 10 positions. Differences from the original: the original takes node injections as unknowns and uses a shared within-block correlation matrix, whereas this reimplementation uses positions within sections and independent blocks; the position is limited to a 10-point alpha grid, so its location error includes the grid error; no neural network")],
         [t("Liang 两阶段", "Liang two-stage"), t("按论文描述复现，复现保真度见表 A3；假设档位与网络参数精确已知，获得根母线相量、末端电压幅值和全网负荷伪量测，多于本方法的量测", "Reimplemented from the paper, fidelity in Table A3; assumes exactly known taps and network parameters and receives root-bus phasors, end-bus voltage magnitudes and load pseudo-measurements, more than our method")],
         ["PCA+SVM / PCA+RF", t("沿用 Chen 等的对照协议；输入为本方法阶段一的特征；SVM 受计算量限制只用 3 万个训练子样本", "Following the comparison protocol of Chen et al.; inputs are the stage-1 features of our method; the SVM uses only a 30,000-sample training subset because of its cost")],
     ]
@@ -245,7 +253,7 @@ def headline(c):
     return dict(hr_ours=A["高阻外推"]["ours"][0], hr_best=A["高阻外推"][vd[2]][0], hr_best_k=vd[2], dom_ours=A["域内"]["ours"][0], dom_best=max(v[0] for k, v in A["域内"].items() if k != "ours"),
                 gain_lo=min(gain), gain_hi=max(gain), la_lo=min(la), la_hi=max(la), n_sc=len(allsc),
                 hc_nn=ev["高阻外推"][NN]["class_acc"], hc_ours=ev["高阻外推"][K]["class_acc"], dom_phys0=fr["域内"][PH]["class_acc"], dom_phys1=ev["域内"][PH]["class_acc"],
-                mae=c["ms34"]["域内"]["本方案测距误差均值km"]["mean"])
+                mae=pe("域内", "ours"))
 
 def contributions(d):
     t, c = d.t, load()
@@ -289,7 +297,7 @@ def row_cells(A_s):
     return [("ours", A_s.get("ours"), ""), ("gcn", vg, tag_of(kg)), ("gat", va, tag_of(ka)), ("bsbl", A_s.get("bsbl"), ""), ("svm", A_s.get("svm"), ""), ("rf", A_s.get("rf"), "")], (kg, ka)
 
 
-FAM_NAME = {"ours": ("本方法", "Ours"), "gcn": ("GCN", "GCN"), "gat": ("GAT", "GAT"), "bsbl": ("块稀疏贝叶斯", "Block-sparse Bayesian"), "svm": ("PCA+SVM", "PCA+SVM"), "rf": ("PCA+随机森林", "PCA+RF")}
+FAM_NAME = {"ours": ("本方法", "Ours"), "gcn": ("GCN", "GCN"), "gat": ("GAT", "GAT"), "bsbl": ("简化块稀疏贝叶斯", "Simplified block-sparse Bayesian"), "svm": ("PCA+SVM", "PCA+SVM"), "rf": ("PCA+随机森林", "PCA+RF")}
 
 
 def fam_hdr(d):
@@ -312,6 +320,24 @@ def table_main(d):
     d.table(2, "IEEE 34 上的主对比：类准确率（%，均值±标准差）。GCN、GAT 各取该场景下较高的输入（P：论文输入，D：突变量输入）；每行最优加粗",
             "Main comparison on IEEE 34: class accuracy (%, mean ± standard deviation). For GCN and GAT the input with the higher accuracy in each scenario is shown (P: paper input, D: disturbance input); the best in each row is in bold",
             [t("场景", "Scenario")] + fam_hdr(d), rows)
+
+
+def table_paired(d):
+    """表 2b：本方法与各场景中均值最高的其余方法的配对比较（种子 0，同一批测试样本）。"""
+    t = d.t
+    pt = J(R34 / "paired_tests.json")
+    fmtp = lambda p: "<0.001" if p < 0.001 else f"{p:.3f}"
+    rows = []
+    for s in CORE5:
+        r = pt[s]
+        cell = lambda tst: f"{tst['diff']:+.1f} [{tst['lo']:+.1f}, {tst['hi']:+.1f}]"
+        rows.append([sc(d, s), mname(d, r["best_other"]), f"{r['ours_class'] * 100:.1f} / {r['other_class'] * 100:.1f}", cell(r["class_test"]), fmtp(r["class_test"]["p"]),
+                     f"{r['ours_exact'] * 100:.1f} / {r['other_exact'] * 100:.1f}", cell(r["exact_test"]), fmtp(r["exact_test"]["p"])])
+    d.table("2b", "本方法与各场景中类准确率均值最高的其余方法的配对比较（种子 0，同一批 5000 个测试样本）：本方法 / 对方的准确率（%）、差值（百分点）及配对 bootstrap 95% 置信区间、McNemar 精确检验 p 值；左为等价类准确率，右为精确区段准确率",
+            "Paired comparison of our method with the other method of highest mean class accuracy in each scenario (seed 0, the same 5,000 test samples): accuracy of ours / the other (%), difference (percentage points) with the paired-bootstrap 95% confidence interval, and the exact McNemar p value; class accuracy on the left, exact section accuracy on the right",
+            [t("场景", "Scenario"), t("对方", "Other method"), t("类准确率 本方法/对方", "Class acc. ours/other"), t("差值 [95% CI]", "Difference [95% CI]"), "p",
+             t("精确区段 本方法/对方", "Exact acc. ours/other"), t("差值 [95% CI]", "Difference [95% CI]"), "p"], rows)
+    return pt
 
 
 def table_breakdown(d):
@@ -340,18 +366,14 @@ def table_loc(d):
     rows = []
     for s in CORE5:
         _, (kg, ka) = row_cells(c["acc"]["34"][s])
-        bs = J(R34 / "baselines_bsbl.json").get(s)
-        ours = c["ms34"][s]["本方案测距误差均值km"]["mean"]
-        ph = {}
-        for fam, k in (("gcn", kg), ("gat", ka), ("svm", "svm"), ("rf", "rf")):
-            b, w = seed0_base(k, s), swap(k, s)
-            ph[fam] = (b["d_mean_midpoint"], w[NN]["d_mean"]) if b and w else None
-        low = min([round(ours, 2), round(bs["d_mean"], 2)] + [round(v[1], 2) for v in ph.values() if v])
+        ours, bs = pe(s, "ours"), pe(s, "bsbl")
+        ph = {fam: (pe(s, f"{k}_mid"), pe(s, f"{k}_phys")) for fam, k in (("gcn", kg), ("gat", ka), ("svm", "svm"), ("rf", "rf"))}
+        low = min([round(ours, 2), round(bs, 2)] + [round(v[1], 2) for v in ph.values()])
         f = lambda x: f"**{x:.2f}**" if round(x, 2) == low else f"{x:.2f}"
-        rows.append([sc(d, s), f(ours), f(bs["d_mean"])] + [(f"{ph[k][0]:.2f} / " + f(ph[k][1])) if ph[k] else "-" for k in ("gcn", "gat", "svm", "rf")])
-    d.table(4, "IEEE 34 的测距误差均值（km）。分类器只输出区段，格式为“取区段中点 / 接阶段二物理定位”（GCN、GAT 的输入同表 2）；每行最小值加粗",
-            "Mean location error on IEEE 34 (km). The classifiers output only the section; the format is “section midpoint / followed by the stage-2 physics-based location” (inputs of GCN and GAT as in Table 2); the smallest in each row is in bold",
-            [t("场景", "Scenario"), t("本方法", "Ours"), t("块稀疏贝叶斯", "Block-sparse Bayesian"), "GCN", "GAT", "PCA+SVM", t("PCA+随机森林", "PCA+RF")], rows)
+        rows.append([sc(d, s), f(ours), f(bs)] + [f"{ph[k][0]:.2f} / " + f(ph[k][1]) for k in ("gcn", "gat", "svm", "rf")])
+    d.table(4, "IEEE 34 的测距误差均值（km，预测点与真实点沿馈线的最短路径距离，种子 0）。分类器只输出区段，格式为“取区段中点 / 接阶段二物理定位”（GCN、GAT 的输入同表 2）；每行最小值加粗",
+            "Mean location error on IEEE 34 (km; shortest path along the feeder between the predicted and the true fault point, seed 0). The classifiers output only the section; the format is “section midpoint / followed by the stage-2 physics-based location” (inputs of GCN and GAT as in Table 2); the smallest in each row is in bold",
+            [t("场景", "Scenario"), t("本方法", "Ours"), t("简化块稀疏贝叶斯", "Simplified block-sparse Bayesian"), "GCN", "GAT", "PCA+SVM", t("PCA+随机森林", "PCA+RF")], rows)
 
 
 ABL5 = ["域内", "负荷偏移", "高阻外推", "噪声×3", "固定档位 域内", "固定档位 负荷偏移"]
@@ -406,7 +428,7 @@ def table_liang(d):
         rows.append([sc(d, s)] + cells)
     d.table(7, "档位固定场景下与 Liang 两阶段方法的比较（IEEE 34，类准确率 %；Liang 取四个变体中最好者；GCN 取较高的输入，P：论文输入，D：突变量输入）",
             "Comparison with the two-stage method of Liang et al. in the fixed-tap scenarios (IEEE 34, class accuracy %; Liang is the best of its four variants; GCN with the higher input, P: paper input, D: disturbance input)", hdr, rows)
-    errs = "; ".join(f"{sc(d, s)}: {t('本方法', 'ours')} {c['ms34'][s]['本方案测距误差均值km']['mean']:.2f} km, Liang {liang_best(ev, s)[1]:.2f} km" for s in FIXED4)
+    errs = "; ".join(f"{sc(d, s)}: {t('本方法', 'ours')} {pe(s, 'ours'):.2f} km, Liang {pe(s, liang_best(ev, s)[2]):.2f} km" for s in FIXED4)
     d.w(t("测距误差（均值）：", "Location error (mean): ") + errs + ".\n")
 
 
@@ -428,7 +450,7 @@ def table_123(d):
         items, _ = row_cells(c["acc"]["123"][s])
         rows.append([sc(d, s)] + fmt_row(items))
     d.table(9, "IEEE 123 上的对比（类准确率 %；GCN 3 个种子（个别线路阻抗 ±20% 为 2 个），GAT 只运行突变量输入，块稀疏贝叶斯每个场景取 1000 个样本，其余为种子 0）；每行最优加粗",
-            "Comparison on IEEE 123 (class accuracy %; GCN 3 seeds (2 for the individual-line scenario), GAT with the disturbance input only, block-sparse Bayesian on 1000 samples per scenario, the rest seed 0); the best in each row is in bold", [t("场景", "Scenario")] + fam_hdr(d), rows)
+            "Comparison on IEEE 123 (class accuracy %; GCN 3 seeds (2 for the individual-line scenario), GAT with the disturbance input only, simplified block-sparse Bayesian on 1000 samples per scenario, the rest seed 0); the best in each row is in bold", [t("场景", "Scenario")] + fam_hdr(d), rows)
 
 
 # ---------------------------------------------------------------- 附录中的大表
@@ -442,17 +464,11 @@ def appendix_full(d):
     d.table("A7a", "主对比的完整版：类准确率（%，均值±标准差；IEEE 34）", "Full version of the main comparison: class accuracy (%, mean ± standard deviation; IEEE 34)", hdr, rows)
     rows = []
     for s in MAIN7:
-        ms = c["ms34"][s]
-        bs = J(R34 / "baselines_bsbl.json").get(s)
-        cell_ = [f"{ms['本方案测距误差均值km']['mean']:.2f}"]
+        cell_ = [f"{pe(s, 'ours'):.2f}"]
         for k, _, _ in METHODS[1:]:
-            if k == "bsbl":
-                cell_.append(f"{bs['d_mean']:.2f}")
-            else:
-                b, w = seed0_base(k, s), swap(k, s)
-                cell_.append(f"{b['d_mean_midpoint']:.2f} / {w[NN]['d_mean']:.2f}" if b and w else "-")
+            cell_.append(f"{pe(s, 'bsbl'):.2f}" if k == "bsbl" else f"{pe(s, k + '_mid'):.2f} / {pe(s, k + '_phys'):.2f}")
         rows.append([sc(d, s)] + cell_)
-    d.table("A7b", "测距误差均值（km）：分类器为“区段中点 / 接物理定位”（IEEE 34）", "Mean location error (km): classifiers as “section midpoint / followed by physics-based location” (IEEE 34)", hdr, rows)
+    d.table("A7b", "测距误差均值（km，沿馈线最短路径距离，种子 0）：分类器为“区段中点 / 接物理定位”（IEEE 34）", "Mean location error (km, shortest path along the feeder, seed 0): classifiers as “section midpoint / followed by physics-based location” (IEEE 34)", hdr, rows)
 
 
 def appendix_extra(d):
@@ -513,6 +529,7 @@ def results(d):
     # ---- 5.1
     w(t("### 5.1 与已发表方法和基线相比，本方法在哪些条件下更好？\n", "### 5.1 Compared with published methods and baselines, under which conditions is our method better?\n"))
     table_main(d)
+    pt = table_paired(d)
     vd = {s: verdict(A, s) for s in CORE5}
     win = [s for s in CORE5 if vd[s][0] == "win"]
     tie = [s for s in CORE5 if vd[s][0] == "tie"]
@@ -523,6 +540,22 @@ def results(d):
         f"差距最大的是过渡电阻超出训练范围（300–1000 Ω）：本方法 {pct(hr['ours'][0])}%，其余方法中最高的{mname(d, kb)}为 {pct(hr[kb][0])}%。同分布内本方法为 {pct(A['域内']['ours'][0])}%，与最强基线（{mname(d, vd['域内'][2])}，{pct(A['域内'][vd['域内'][2]][0])}%）相差 {abs(vd['域内'][1]):.1f} 个百分点。",
         f"Against the best of the other methods in each scenario (a difference counts as significant only if it exceeds twice the larger standard deviation), our method is significantly higher in {len(win)} scenario(s) ({lst(win)}), not significantly different in {len(tie)} ({lst(tie)}) and significantly lower in {len(lose)} ({lst(lose)}). "
         f"The gap is largest when the fault resistance leaves the training range (300–1000 Ω): our method reaches {pct(hr['ours'][0])}%, the best of the other methods, {mname(d, kb)}, {pct(hr[kb][0])}%. In-domain, ours is {pct(A['域内']['ours'][0])}%, {abs(vd['域内'][1]):.1f} percentage points {'above' if vd['域内'][1] > 0 else 'below'} the strongest baseline ({mname(d, vd['域内'][2])}, {pct(A['域内'][vd['域内'][2]][0])}%).") + "\n")
+    def pt_group(key):
+        up = [s for s in CORE5 if pt[s][key]["p"] < 0.05 and pt[s][key]["diff"] > 0]
+        dn = [s for s in CORE5 if pt[s][key]["p"] < 0.05 and pt[s][key]["diff"] < 0]
+        return up, dn, [s for s in CORE5 if s not in up + dn]
+    cu, cd, cn = pt_group("class_test")
+    eu, ed, en_ = pt_group("exact_test")
+    cat = lambda up, dn, s: "win" if s in up else "lose" if s in dn else "tie"
+    differ = [s for s in CORE5 if cat(cu, cd, s) != vd[s][0]]
+    dif_txt = "、".join(sc(d, s) for s in differ) if d.L == "zh" else ", ".join(sc(d, s) for s in differ)
+    dtl = lambda ss, key: "、".join(f"{sc(d, s)} {pt[s][key]['diff']:+.1f}" for s in ss) if d.L == "zh" else ", ".join(f"{sc(d, s)} {pt[s][key]['diff']:+.1f}" for s in ss)
+    w(t(f"表 2b 在种子 0 的同一批测试样本上做配对检验（对方为各场景均值最高者）。类准确率上，本方法显著更高的有 {len(cu)} 个场景（{dtl(cu, 'class_test') or '无'} 个百分点），显著更低的有 {len(cd)} 个（{dtl(cd, 'class_test') or '无'}），其余 {len(cn)} 个差异不显著；"
+        f"精确区段准确率上，显著更高的有 {len(eu)} 个场景（{dtl(eu, 'exact_test') or '无'}），显著更低的有 {len(ed)} 个（{dtl(ed, 'exact_test') or '无'}）。"
+        "配对检验只含测试样本的随机性，不含训练随机性，而按种子间标准差的判断只含训练随机性，两者在" + (f"{dif_txt}上的结论不同；这些场景一律按本方法不优于对方处理。" if differ else "各场景的结论一致。"),
+        f"Table 2b applies paired tests on the same seed-0 test samples (the other method is the best one of each scenario). For class accuracy, our method is significantly higher in {len(cu)} scenario(s) ({dtl(cu, 'class_test') or 'none'} percentage points), significantly lower in {len(cd)} ({dtl(cd, 'class_test') or 'none'}) and not significantly different in the other {len(cn)}; "
+        f"for exact section accuracy it is significantly higher in {len(eu)} ({dtl(eu, 'exact_test') or 'none'}) and significantly lower in {len(ed)} ({dtl(ed, 'exact_test') or 'none'}). "
+        "A paired test contains only the randomness of the test samples, while the judgement by the standard deviation across seeds contains only the randomness of training; the two " + (f"disagree in {dif_txt}, and these scenarios are all treated as our method not being better than the other." if differ else "agree in every scenario.")) + "\n")
     zl = [(s, verdict(A, s)) for s in ("线路阻抗+10%", "线路阻抗-10%")]
     gaps = [-v[1] for s, v in zl if v[0] == "lose"]
     w(t(f"线路阻抗存在偏差时，GCN 等基线不低于本方法：个别线路阻抗 ±20% 时论文输入的 GCN 比本方法高 {-vd['个别线路阻抗±20%'][1]:.1f} 个百分点" + (f"；全网线路阻抗整体偏差 ±10% 时（附录表 A5）差距为 {min(gaps):.1f}–{max(gaps):.1f} 个百分点" if gaps else "") +
@@ -552,7 +585,7 @@ def results(d):
         kb2 = max(others, key=lambda k: g[k]["class_acc"])
         nz[lv] = (g["本方案"]["class_acc"] * 100, g[kb2]["class_acc"] * 100, kb2)
     behind = [lv for lv in nz if nz[lv][0] < nz[lv][1] - 0.05]
-    nm_ = lambda k: {"GCN 论文输入": "GCN（论文输入）", "GCN 突变量输入": "GCN（突变量输入）", "GAT 论文输入": "GAT（论文输入）", "GAT 突变量输入": "GAT（突变量输入）", "PCA+SVM": "PCA+SVM", "PCA+随机森林": "PCA+随机森林", "块稀疏贝叶斯学习": "块稀疏贝叶斯"}[k] if d.L == "zh" else {"GCN 论文输入": "GCN (paper input)", "GCN 突变量输入": "GCN (disturbance input)", "GAT 论文输入": "GAT (paper input)", "GAT 突变量输入": "GAT (disturbance input)", "PCA+SVM": "PCA+SVM", "PCA+随机森林": "PCA+RF", "块稀疏贝叶斯学习": "block-sparse Bayesian"}[k]
+    nm_ = lambda k: {"GCN 论文输入": "GCN（论文输入）", "GCN 突变量输入": "GCN（突变量输入）", "GAT 论文输入": "GAT（论文输入）", "GAT 突变量输入": "GAT（突变量输入）", "PCA+SVM": "PCA+SVM", "PCA+随机森林": "PCA+随机森林", "块稀疏贝叶斯学习": "简化块稀疏贝叶斯"}[k] if d.L == "zh" else {"GCN 论文输入": "GCN (paper input)", "GCN 突变量输入": "GCN (disturbance input)", "GAT 论文输入": "GAT (paper input)", "GAT 突变量输入": "GAT (disturbance input)", "PCA+SVM": "PCA+SVM", "PCA+随机森林": "PCA+RF", "块稀疏贝叶斯学习": "simplified block-sparse Bayesian"}[k]
     ahead_txt = "、".join(f"×{lv:g}" for lv in nz if lv not in behind)
     behind_txt = "；".join(f"×{lv:g} 时{nm_(nz[lv][2])}高 {nz[lv][1] - nz[lv][0]:.1f} 个百分点" for lv in behind)
     behind_en = "; ".join(f"at ×{lv:g} {nm_(nz[lv][2])} is {nz[lv][1] - nz[lv][0]:.1f} points higher" for lv in behind)
@@ -562,13 +595,13 @@ def results(d):
     w(t("### 5.3 预测的故障点离真实故障点有多远？\n", "### 5.3 How far is the predicted fault point from the true one?\n"))
     d.fig(4)
     table_loc(d)
-    mid_ = {k: [seed0_base(k, s)["d_mean_midpoint"] for s in ("域内",)][0] for k in ("gcn_d", "svm")}
-    ph_in = (min(swap(k, "域内")[NN]["d_mean"] for k in TAG), max(swap(k, "域内")[NN]["d_mean"] for k in TAG))
-    ph_hr = (min(swap(k, "高阻外推")[NN]["d_mean"] for k in TAG), max(swap(k, "高阻外推")[NN]["d_mean"] for k in TAG))
-    w(t(f"分类器基线只输出区段，故障点取预测区段中点，测距误差因此明显偏大（域内 {min(seed0_base(k, '域内')['d_mean_midpoint'] for k in TAG):.2f}–{max(seed0_base(k, '域内')['d_mean_midpoint'] for k in TAG):.2f} km）；把它们的 Top-1 区段交给阶段二估计区段内位置后，域内降到 {ph_in[0]:.2f}–{ph_in[1]:.2f} km，与本方法（{c['ms34']['域内']['本方案测距误差均值km']['mean']:.2f} km）接近，说明区段内测距精度主要来自物理反演。"
-        f"高阻外推下，各分类器接物理定位后仍有 {ph_hr[0]:.2f}–{ph_hr[1]:.2f} km，本方法为 {c['ms34']['高阻外推']['本方案测距误差均值km']['mean']:.2f} km，差别来自区段选错（见 5.4 节）。块稀疏贝叶斯自带位置估计，但位置受 α 网格限制，且误判区段时误差很大（图 4、表 4）。",
-        f"The classifier baselines output only the section and the fault point is taken at the section midpoint, so their location error is much larger ({min(seed0_base(k, '域内')['d_mean_midpoint'] for k in TAG):.2f}–{max(seed0_base(k, '域内')['d_mean_midpoint'] for k in TAG):.2f} km in-domain); once their Top-1 section is handed to stage 2 to estimate the position within the section, the in-domain error falls to {ph_in[0]:.2f}–{ph_in[1]:.2f} km, close to our method ({c['ms34']['域内']['本方案测距误差均值km']['mean']:.2f} km), which shows that the accuracy of the position within a section comes mainly from the physics-based inversion. "
-        f"Under high resistance the classifiers followed by physics-based location still have {ph_hr[0]:.2f}–{ph_hr[1]:.2f} km against {c['ms34']['高阻外推']['本方案测距误差均值km']['mean']:.2f} km for our method, the difference coming from wrongly selected sections (Section 5.4). Block-sparse Bayesian learning estimates the position itself, but it is limited by the α grid and its error is large when it selects the wrong section (Fig. 4, Table 4).") + "\n")
+    mid_in = [pe("域内", f"{k}_mid") for k in TAG]
+    ph_in = (min(pe("域内", f"{k}_phys") for k in TAG), max(pe("域内", f"{k}_phys") for k in TAG))
+    ph_hr = (min(pe("高阻外推", f"{k}_phys") for k in TAG), max(pe("高阻外推", f"{k}_phys") for k in TAG))
+    w(t(f"分类器基线只输出区段，故障点取预测区段中点，测距误差因此明显偏大（域内 {min(mid_in):.2f}–{max(mid_in):.2f} km）；把它们的 Top-1 区段交给阶段二估计区段内位置后，域内降到 {ph_in[0]:.2f}–{ph_in[1]:.2f} km，与本方法（{pe('域内', 'ours'):.2f} km）接近，说明区段内测距精度主要来自物理反演。"
+        f"高阻外推下，各分类器接物理定位后仍有 {ph_hr[0]:.2f}–{ph_hr[1]:.2f} km，本方法为 {pe('高阻外推', 'ours'):.2f} km，差别来自区段选错（见 5.4 节）。块稀疏贝叶斯自带位置估计，但位置受 α 网格限制，且误判区段时误差很大（图 4、表 4）。",
+        f"The classifier baselines output only the section and the fault point is taken at the section midpoint, so their location error is much larger ({min(mid_in):.2f}–{max(mid_in):.2f} km in-domain); once their Top-1 section is handed to stage 2 to estimate the position within the section, the in-domain error falls to {ph_in[0]:.2f}–{ph_in[1]:.2f} km, close to our method ({pe('域内', 'ours'):.2f} km), which shows that the accuracy of the position within a section comes mainly from the physics-based inversion. "
+        f"Under high resistance the classifiers followed by physics-based location still have {ph_hr[0]:.2f}–{ph_hr[1]:.2f} km against {pe('高阻外推', 'ours'):.2f} km for our method, the difference coming from wrongly selected sections (Section 5.4). Block-sparse Bayesian learning estimates the position itself, but it is limited by the α grid and its error is large when it selects the wrong section (Fig. 4, Table 4).") + "\n")
     # ---- 5.4
     w(t("### 5.4 各个组成部分各自起了什么作用？\n", "### 5.4 What does each component contribute?\n"))
     table_ablation(d)
@@ -576,12 +609,11 @@ def results(d):
     allsc = [s for s in fr if s not in ("thresholds", "equivalence_classes", "k", "config", "耗时_ms每样本") and s in co]
     gain = [(co[s][PH]["class_acc"] - fr[s][PH]["class_acc"]) * 100 for s in allsc]
     jn = sum(1 for s in allsc if co[s][K]["class_acc"] > fr[s][K]["class_acc"])
-    dn = sum(1 for s in allsc if co[s][K]["d_mean"] < fr[s][K]["d_mean"])
     fx = [s for s in allsc if s.startswith("固定档位") or s == "高阻外推"]
     gg = [(co[s][PH]["class_acc"] - ng[s][PH]["class_acc"]) * 100 for s in fx if s in ng]
-    w(t(f"表 5 是物理模型的受控消融。把过渡电阻限定为实数后，物理穷举的类准确率在全部 {len(allsc)} 个评测场景（含附录场景）都提高，提高 {min(gain):.1f}–{max(gain):.1f} 个百分点；联合决策在 {jn} 个场景提高，测距误差在 {dn} 个场景降低。实增益在故障前电压偏离名义值较多的场景作用明显：高阻外推与固定档位场景下，去掉增益使物理穷举降低 {min(gg):.1f}–{max(gg):.1f} 个百分点；"
+    w(t(f"表 5 是物理模型的受控消融。把过渡电阻限定为实数后，物理穷举的类准确率在全部 {len(allsc)} 个评测场景（含附录场景）都提高，提高 {min(gain):.1f}–{max(gain):.1f} 个百分点；联合决策在 {jn} 个场景提高。实增益在故障前电压偏离名义值较多的场景作用明显：高阻外推与固定档位场景下，去掉增益使物理穷举降低 {min(gg):.1f}–{max(gg):.1f} 个百分点；"
         "增益对联合决策类准确率的影响不一致，收益主要体现在物理穷举与测距误差上。线路阻抗整体偏差 ±10% 的场景下，约束对联合决策没有增益。",
-        f"Table 5 is a controlled ablation of the physics model. Restricting the fault resistance to a real number raises the class accuracy of the exhaustive physics-based inversion in all {len(allsc)} evaluated scenarios (including those in the appendix), by {min(gain):.1f}–{max(gain):.1f} percentage points; the joint decision improves in {jn} scenarios and the location error decreases in {dn}. The real gain matters where the pre-fault voltage deviates from the nominal value: in the high-resistance and fixed-tap scenarios, removing the gain lowers the exhaustive inversion by {min(gg):.1f}–{max(gg):.1f} percentage points; "
+        f"Table 5 is a controlled ablation of the physics model. Restricting the fault resistance to a real number raises the class accuracy of the exhaustive physics-based inversion in all {len(allsc)} evaluated scenarios (including those in the appendix), by {min(gain):.1f}–{max(gain):.1f} percentage points; the joint decision improves in {jn} scenarios. The real gain matters where the pre-fault voltage deviates from the nominal value: in the high-resistance and fixed-tap scenarios, removing the gain lowers the exhaustive inversion by {min(gg):.1f}–{max(gg):.1f} percentage points; "
         "its effect on the class accuracy of the joint decision is inconsistent, and its benefit shows mainly in the exhaustive inversion and in the location error. Under global line-impedance errors of ±10% the constraint brings no gain to the joint decision.") + "\n")
     table_swap(d)
     tally = {}
@@ -654,13 +686,13 @@ def abstract(d):
     d.w(t("## 摘要\n", "## Abstract\n"))
     d.w(t(
         f"配电网只有极少数同步量测点时，现有故障定位方法各有不足：数据驱动方法在测试条件偏离训练分布时精度下降，物理反演不受训练分布影响，但在响应相近的区段之间区分度不足。"
-        f"本文提出数据粗筛与物理闭环校正的两阶段方法：神经网络把故障区段缩小到两个候选，再用过渡电阻限定为实数的物理反演逐个核对并估计区段内位置，由贝叶斯联合打分合并两者的证据；"
+        f"本文提出数据粗筛与物理闭环校正的两阶段方法：神经网络把故障区段缩小到两个候选，再用过渡电阻限定为实数的物理反演逐个核对并估计区段内位置，由概率—残差联合打分合并两者的证据；"
         f"候选都不能解释量测时扩大搜索范围，仍不能解释则发出失配告警。在 IEEE 34 节点（5 个测点、30 个区段）上，过渡电阻超出训练范围（300–1000 Ω）时本方法的区段准确率（按等价类判定）为 {pct(h['hr_ours'])}%，"
         f"对比的外部方法中最高的为 {pct(h['hr_best'])}%；同分布内与最强基线相当（本方法 {pct(h['dom_ours'])}%，基线最高 {pct(h['dom_best'])}%）；把过渡电阻限定为实数使物理反演的区段准确率在全部 {h['n_sc']} 个场景提高 {h['gain_lo']:.1f}–{h['gain_hi']:.1f} 个百分点；"
         f"在调压器档位固定的 4 个场景中比 Liang 等的两阶段方法高 {h['la_lo']:.1f}–{h['la_hi']:.1f} 个百分点。在 IEEE 123 节点（8 个测点、118 个区段）的 5 个核心场景中，本方法在 {sum(1 for x in v3 if x == 'win')} 个显著优于其余方法。"
         f"线路阻抗存在偏差时，部分基线的区段准确率更高；逐线阻抗真值诊断表明位置误差的增加来自线路参数失配。全部结果来自仿真。",
         f"With only a handful of synchronized sensors in a distribution network, existing fault-location methods each fall short: data-driven methods lose accuracy when test conditions leave the training distribution, and physics-based inversion, which is insensitive to the training distribution, cannot separate sections whose responses are similar. "
-        f"We propose a two-stage method of data-driven screening and physics-based closed-loop verification: a neural network narrows the faulted section to two candidates, a physics-based inversion with a real-valued fault resistance verifies each candidate and estimates the position within the section, and a Bayesian joint score combines the two pieces of evidence; "
+        f"We propose a two-stage method of data-driven screening and physics-based closed-loop verification: a neural network narrows the faulted section to two candidates, a physics-based inversion with a real-valued fault resistance verifies each candidate and estimates the position within the section, and a joint probability–residual score combines the two pieces of evidence; "
         f"when no candidate explains the measurements the search is widened, and if it still fails a mismatch alarm is raised. On the IEEE 34-bus feeder (5 sensors, 30 sections), when the fault resistance leaves the training range (300–1000 Ω) our method reaches a section accuracy (judged by equivalence class) of {pct(h['hr_ours'])}%, "
         f"against {pct(h['hr_best'])}% for the best external method compared; within the training distribution it is on par with the strongest baseline ({pct(h['dom_ours'])}% against at most {pct(h['dom_best'])}%); restricting the fault resistance to a real number raises the section accuracy of the physics-based inversion by {h['gain_lo']:.1f}–{h['gain_hi']:.1f} percentage points in all {h['n_sc']} scenarios; "
         f"and in the four fixed-tap scenarios it is {h['la_lo']:.1f}–{h['la_hi']:.1f} percentage points above the two-stage method of Liang et al. On the IEEE 123-bus feeder (8 sensors, 118 sections) it is significantly better than the other methods in {sum(1 for x in v3 if x == 'win')} of the 5 core scenarios. "
@@ -697,10 +729,10 @@ def conclusion(d):
     h = headline(c)
     d.w(t("## 7 结论\n", "## 7 Conclusion\n"))
     d.w(t(
-        f"本文针对极稀疏量测下的配电网故障定位，提出神经网络粗筛、物理反演校正、贝叶斯联合打分的两阶段方法，并加入候选扩展与失配告警。在 IEEE 34 与 IEEE 123 的仿真中，过渡电阻超出训练范围时本方法的区段准确率明显高于对比的数据驱动、稀疏恢复与两阶段方法"
+        f"本文针对极稀疏量测下的配电网故障定位，提出神经网络粗筛、物理反演校正、概率—残差联合打分的两阶段方法，并加入候选扩展与失配告警。在 IEEE 34 与 IEEE 123 的仿真中，过渡电阻超出训练范围时本方法的区段准确率明显高于对比的数据驱动、稀疏恢复与两阶段方法"
         f"（IEEE 34 为 {pct(h['hr_ours'])}%，对比方法中最高 {pct(h['hr_best'])}%），同分布内与最强基线相当；区段内的测距精度来自物理反演，把过渡电阻限定为实数使物理反演的区段准确率在全部 {h['n_sc']} 个场景提高 {h['gain_lo']:.1f}–{h['gain_hi']:.1f} 个百分点。"
         f"方法的主要局限是线路阻抗存在偏差时部分基线更高，以及没有实测验证。后续工作包括线路参数辨识与方法的联合、拓扑变化与分布式电源、以及实测数据验证。",
-        f"For fault location in distribution networks with extremely sparse measurements, this paper proposed a two-stage method of neural-network screening, physics-based verification and Bayesian joint scoring, with candidate expansion and a mismatch alarm. "
+        f"For fault location in distribution networks with extremely sparse measurements, this paper proposed a two-stage method of neural-network screening, physics-based verification and joint probability–residual scoring, with candidate expansion and a mismatch alarm. "
         f"In simulations on IEEE 34 and IEEE 123, when the fault resistance leaves the training range the section accuracy of our method is clearly higher than that of the compared data-driven, sparse-recovery and two-stage methods ({pct(h['hr_ours'])}% on IEEE 34 against at most {pct(h['hr_best'])}%), and within the training distribution it is on par with the strongest baseline; "
         f"the accuracy of the position within a section comes from the physics-based inversion, and restricting the fault resistance to a real number raises the section accuracy of the physics-based inversion by {h['gain_lo']:.1f}–{h['gain_hi']:.1f} percentage points in all {h['n_sc']} scenarios. "
         f"The main limitations are that some baselines are higher when line impedances are in error and that there is no field validation. Future work includes combining the method with line-parameter identification, topology changes and distributed generation, and validation with field data.\n"))

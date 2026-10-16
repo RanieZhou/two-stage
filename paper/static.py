@@ -23,10 +23,10 @@ def intro(d):
         f"In the papers we reviewed, the fault resistance and load level of the test set generally follow the training distribution, and extrapolation beyond the training range is rarely tested (see Section 2).\n"))
     w(t(
         "这两类方法的失效条件不同：数据驱动方法在训练分布外失效，物理方法在响应相近的区段之间失效。本文据此提出“数据粗筛、物理校正”的两阶段方法：神经网络把候选区段缩小到两个，"
-        "再用过渡电阻限定为实数的物理反演逐个核对并估计区段内位置，最后用贝叶斯联合打分合并两者的证据；两路证据都不能解释量测时扩大搜索范围，仍不能解释则发出失配告警。",
+        "再用过渡电阻限定为实数的物理反演逐个核对并估计区段内位置，最后用概率—残差联合打分合并两者的证据；两路证据都不能解释量测时扩大搜索范围，仍不能解释则发出失配告警。",
         "The two families fail under different conditions: data-driven methods fail outside the training distribution, physics-based methods fail between sections with similar responses. "
         "We therefore propose a two-stage method in which a neural network screens the faulted section down to two candidates, a physics-based inversion with a real-valued fault resistance verifies each candidate and estimates the position within the section, "
-        "and a Bayesian joint score combines the two pieces of evidence. When neither explains the measurements, the search is widened, and if it still fails a model-mismatch alarm is raised.\n"))
+        "and a joint probability–residual score combines the two pieces of evidence. When neither explains the measurements, the search is widened, and if it still fails a model-mismatch alarm is raised.\n"))
     w(t("本文的贡献：\n", "The contributions of this paper are:\n"))
     d.contrib(intro_contrib)
 
@@ -110,10 +110,10 @@ def method(d):
         "The outputs are $J_{\\mathrm{pen}}$, $J$, the position estimate $\\hat\\alpha$ and the fault type.\n"))
     w(t("### 3.4 阶段三：联合打分、候选扩展与告警\n", "### 3.4 Stage 3: joint score, candidate expansion and alarm\n"))
     w(t(
-        "候选区段的得分为 $S_s=\\ln P(s\\mid\\mathbf z)-\\lambda\\,J_{\\mathrm{pen}}(s)$，取得分最大的候选；$\\lambda$ 在验证集上最大化真实等价类的联合后验似然得到。"
+        "候选区段的得分为 $S_s=\\ln P(s\\mid\\mathbf z)-\\lambda\\,J_{\\mathrm{pen}}(s)$，取得分最大的候选；$\\lambda$ 在验证集上最大化真实等价类在联合得分 softmax 下的对数似然得到。该得分是对两路证据的启发式融合而不是严格的后验：神经网络与物理残差使用同一组量测，不假设二者独立，$\\lambda$ 由验证集经验标定。"
         "设 $\\theta$ 为假设正确时残差 $J$ 的 99% 分位数（验证集上标定）：若两个候选的 $J$ 都大于 $\\theta$，说明阶段一的候选集不可信，把候选扩展到全部区段重新打分；扩展后最小的 $J$ 仍大于 $\\theta$，则标记模型失配告警。"
         "置信度取候选池内 $\\mathrm{softmax}(S)$ 在所选区段所属等价类上的概率。等价类由物理证据定义：真实故障在 $s$ 时，若不少于一半的样本中区段 $s'$ 的惩罚残差不比 $s$ 大出 4，则两者互相不可区分，双向不可区分的区段连通成一类。",
-        "The score of a candidate is $S_s=\\ln P(s\\mid\\mathbf z)-\\lambda\\,J_{\\mathrm{pen}}(s)$ and the candidate with the largest score is chosen; $\\lambda$ is fitted on a validation set by maximizing the joint posterior likelihood of the true equivalence class. "
+        "The score of a candidate is $S_s=\\ln P(s\\mid\\mathbf z)-\\lambda\\,J_{\\mathrm{pen}}(s)$ and the candidate with the largest score is chosen; $\\lambda$ is fitted on a validation set by maximizing the log-likelihood of the true equivalence class under the softmax of the combined score. The score is a heuristic fusion of the two pieces of evidence, not a strict posterior: the neural network and the physics-based residual use the same measurements, independence is not assumed, and $\\lambda$ is calibrated empirically on the validation set. "
         "Let $\\theta$ be the 99th percentile of the residual $J$ when the hypothesis is correct (calibrated on the validation set). If the $J$ of both candidates exceeds $\\theta$, the candidate set from stage 1 is not trustworthy, and the candidates are expanded to all sections and re-scored; "
         "if the smallest $J$ after expansion still exceeds $\\theta$, a model-mismatch alarm is raised. The confidence is the probability that $\\mathrm{softmax}(S)$ over the candidate pool places on the equivalence class of the chosen section. "
         "Equivalence classes are defined from physical evidence: for a true fault in $s$, if in at least half of the samples the penalized residual of section $s'$ is not larger than that of $s$ by more than 4, the two cannot be distinguished; sections that are mutually indistinguishable are connected into one class.\n"))
@@ -125,11 +125,11 @@ def setup(d):
     w(t("### 4.1 系统、测点与数据\n", "### 4.1 Systems, sensors and data\n"))
     w(t(
         f"测试系统为 IEEE 34 节点馈线（30 个故障区段）和 IEEE 123 节点馈线（118 个故障区段，开关作为短连接线），仿真用 OpenDSS{c('OpenDSS')}。IEEE 34 的 5 个测点位于母线 814、836、802、822、834，"
-        "IEEE 123 的 8 个测点位于母线 60、47、95、1、108、27、81、30（图 2）；测点按物理穷举的平均测距误差贪心前向选取。每个测点量测母线的三相电压和一条相连线路的三相电流，IEEE 34 共 26 个复数量测，IEEE 123 共 44 个。"
+        "IEEE 123 的 8 个测点位于母线 60、47、95、1、108、27、81、30（图 2）；测点按物理穷举的平均测距误差（预测点与真实点到变电站距离之差）贪心前向选取。每个测点量测母线的三相电压和一条相连线路的三相电流，IEEE 34 共 26 个复数量测，IEEE 123 共 44 个。"
         "量测噪声：电压为名义电压的 0.1%，电流为 0.2 A，突变量为两次量测之差，噪声标准差再乘 $\\sqrt2$。故障共 10 种类型（单相接地、相间、两相接地、三相接地），位置沿全网均匀，过渡电阻在训练集中对数均匀取 0.01–300 Ω，负荷倍率取 0.6–1.1。"
         "训练集 IEEE 34 为 8 万个名义阻抗样本加线路阻抗倍率 0.88、0.94、1.06、1.12 各 2 万个，IEEE 123 为 12 万个加各 3 万个；每个测试场景 5000 个样本。",
         f"The test systems are the IEEE 34-bus feeder (30 fault sections) and the IEEE 123-bus feeder (118 fault sections; switches are modeled as short connections), simulated with OpenDSS {c('OpenDSS')}. The five sensors of IEEE 34 are at buses 814, 836, 802, 822 and 834, "
-        "and the eight of IEEE 123 at buses 60, 47, 95, 1, 108, 27, 81 and 30 (Fig. 2); they were chosen by greedy forward selection on the mean location error of exhaustive physics-based inversion. Each sensor measures the three-phase voltages of its bus and the three-phase currents of one adjacent line, "
+        "and the eight of IEEE 123 at buses 60, 47, 95, 1, 108, 27, 81 and 30 (Fig. 2); they were chosen by greedy forward selection on the mean location error of exhaustive physics-based inversion (difference of the distances from the substation). Each sensor measures the three-phase voltages of its bus and the three-phase currents of one adjacent line, "
         "giving 26 complex measurements for IEEE 34 and 44 for IEEE 123. Measurement noise is 0.1% of the nominal voltage and 0.2 A for current; the disturbance is the difference of two measurements, so the noise standard deviation is multiplied by $\\sqrt2$. "
         "There are 10 fault types (single-phase-to-ground, phase-to-phase, two-phase-to-ground, three-phase-to-ground), the position is uniform over the whole network, the fault resistance in the training set is log-uniform in 0.01–300 Ω and the load multiplier is 0.6–1.1. "
         "The IEEE 34 training set has 80,000 nominal-impedance samples plus 20,000 each at line-impedance scales 0.88, 0.94, 1.06 and 1.12; IEEE 123 has 120,000 plus 30,000 each. Each test scenario has 5000 samples.\n"))
@@ -144,13 +144,13 @@ def setup(d):
         "supplementary scenarios such as global line-impedance errors of ±5%/±10%, independent load variation and combined line and load errors are in Table A5 of the appendix.\n"))
     w(t("### 4.3 对比方法\n", "### 4.3 Compared methods\n"))
     w(t(
-        f"共 6 个外部方法，其中 4 个为已发表方法，2 个为机器学习基线，均在相同的训练集上训练、使用相同的量测。已发表方法：（1）GCN{c('Chen2019')}，切比雪夫图卷积，输入有“论文输入”（故障期间相量的幅值与相角）和“突变量输入”（与阶段一相同的特征）两种；"
+        f"共 6 个外部方法，其中 4 个为已发表方法，2 个为机器学习基线。GCN、GAT 和两个机器学习基线与阶段一使用相同的训练数据和量测；块稀疏贝叶斯和 Liang 两阶段不训练神经网络，Liang 两阶段还获得更多量测（见下）。已发表方法：（1）GCN{c('Chen2019')}，切比雪夫图卷积，输入有“论文输入”（故障期间相量的幅值与相角）和“突变量输入”（与阶段一相同的特征）两种；"
         f"（2）GAT{c('LLiang2024')}，3 层 4 头图注意力，注意力限于物理相邻母线，两种输入同 GCN；（3）块稀疏贝叶斯学习{c('Jiang2021')}，以各候选位置的三相虚拟注入电流为未知量，用 EM 迭代估计块方差，取能量最大的块；位置受 10 点 $\\alpha$ 网格限制，不使用神经网络，线路参数取名义值；"
         f"（4）Liang 两阶段方法{c('DLiang2025')}，线性模型匹配筛选加非线性故障状态估计，假设调压器档位与网络参数精确已知，因此只在档位固定的场景比较，并获得多于本方法的量测（根母线相量、末端电压幅值、全网负荷伪量测）。"
         f"机器学习基线：（5）PCA+SVM 和（6）PCA+随机森林，沿用 Chen 等的对照协议{c('Chen2019')}，输入为阶段一的特征，标准化后做 PCA（保留 99% 方差）；SVM 为 RBF 核，受核方法计算量限制只用 3 万个训练子样本。"
         f"除 Liang 两阶段方法和块稀疏贝叶斯学习外，所有分类器都只输出区段，故障点取预测区段中点；我们另外把每个分类器的 Top-1 区段交给阶段二估计区段内位置（记作“+物理定位”），或把它的概率作为阶段一接入完整流程（记作“+本方法流程”），以分开评价区段选择与位置估计。"
         f"内部对照还有神经网络 Top-1 加物理定位（硬串联）、全区段物理穷举、已知区段的 Oracle。所有基线均为我们按原文复现，与原作者的实现可能有差异，详见附录表 A6。",
-        f"There are six external methods, four published methods and two machine-learning baselines, all trained on the same training set and using the same measurements. The published methods are: (1) GCN {c('Chen2019')}, Chebyshev graph convolution, with two inputs, the “paper input” (magnitude and angle of the during-fault phasors) and the “disturbance input” (the same features as stage 1); "
+        f"There are six external methods, four published methods and two machine-learning baselines. GCN, GAT and the two machine-learning baselines use the same training data and measurements as stage 1; block-sparse Bayesian learning and the method of Liang et al. train no neural network, and the latter receives more measurements (see below). The published methods are: (1) GCN {c('Chen2019')}, Chebyshev graph convolution, with two inputs, the “paper input” (magnitude and angle of the during-fault phasors) and the “disturbance input” (the same features as stage 1); "
         f"(2) GAT {c('LLiang2024')}, three layers with four attention heads restricted to physically adjacent buses, with the same two inputs; (3) block-sparse Bayesian learning {c('Jiang2021')}, which takes the three-phase virtual injection current at each candidate position as the unknown and estimates the block variances by EM, choosing the block with the largest energy; the position is limited to a 10-point $\\alpha$ grid, no neural network is used and line parameters are nominal; "
         f"(4) the two-stage method of Liang et al. {c('DLiang2025')}, linear model matching for screening followed by a nonlinear fault state estimation, which assumes exactly known regulator taps and network parameters and is therefore compared only in the fixed-tap scenarios, and which receives more measurements than our method (root-bus phasors, end-bus voltage magnitudes, load pseudo-measurements). "
         f"The machine-learning baselines are (5) PCA+SVM and (6) PCA+random forest, following the comparison protocol of Chen et al. {c('Chen2019')}, with the stage-1 features standardized and reduced by PCA (99% of the variance); the SVM has an RBF kernel and, because of the cost of kernel methods, is trained on a random subset of 30,000 samples. "
@@ -158,10 +158,10 @@ def setup(d):
         f"or feed its probability into the full procedure as stage 1 (“+our procedure”). Internal references are neural-network Top-1 followed by physics-based location (hard cascade), exhaustive physics-based inversion over all sections, and an oracle with the section known. All baselines are our reimplementations from the original papers and may differ from the original authors' code; see Table A6.\n"))
     w(t("### 4.4 评价指标与统计\n", "### 4.4 Metrics and statistics\n"))
     w(t(
-        "区段准确率按等价类判定（IEEE 34 为 22 类，IEEE 123 为 64 类；等价类由物理证据定义并固定，使不同方法同口径），同时报告精确区段准确率。测距误差为预测故障点与真实故障点沿馈线到变电站的距离之差的绝对值（km），报告均值，必要时报告中位数、P90 与分位数。"
+        "区段准确率按等价类判定（IEEE 34 为 22 类，IEEE 123 为 64 类；等价类由物理证据定义并固定，使不同方法同口径），同时报告精确区段准确率。测距误差为预测故障点与真实故障点沿馈线的最短路径距离（km），报告均值，必要时报告中位数、P90 与分位数；预测到另一支线时，该距离包含绕经分叉点的路径。"
         "纠错率 CR 与误改率 FCR 以阶段一 Top-1 的对错为参照。神经网络训练的随机性用多个种子衡量：IEEE 34 上本方法与 GCN 为 5 个种子，GAT 与 PCA 基线为 3 个种子；块稀疏贝叶斯没有随机性，Liang 两阶段为单次结果；IEEE 123 上本方法 5 个种子、GCN 3 个种子，其余基线为单次结果；报告均值±标准差，均值差超过两者较大标准差的 2 倍才称为显著。",
         "Section accuracy is judged at the level of equivalence classes (22 classes for IEEE 34, 64 for IEEE 123; the classes are defined from physical evidence and fixed so that all methods are scored the same way), and exact section accuracy is also reported. "
-        "The location error is the absolute difference (km) between the predicted and true fault points measured along the feeder from the substation; we report the mean and, where useful, the median, P90 and quantiles. "
+        "The location error is the shortest path distance (km) along the feeder between the predicted and the true fault point, so a prediction on another branch includes the path through the branching point; we report the mean and, where useful, the median, P90 and quantiles. "
         "The correction rate CR and false-correction rate FCR are defined relative to the correctness of the stage-1 Top-1. Training randomness is measured with several seeds: on IEEE 34, five seeds for our method and GCN and three for GAT and the PCA baselines (block-sparse Bayesian learning has no randomness and the method of Liang et al. is a single run); "
         "on IEEE 123 five seeds for our method, three for GCN and single runs for the other baselines; results are reported as mean ± standard deviation; a difference of means is called significant only if it exceeds twice the larger standard deviation.\n"))
 

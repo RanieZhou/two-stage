@@ -1,6 +1,6 @@
 """论文插图：python make_figures.py [--lang zh|en]，输出 figures/<lang>/figN.{pdf,png}。
 
-数据来源：results/improved/ 下的 breakdown.json、tier1.json、multi_seed.json、samples.npz、stage1_swap/、baselines_*_samples.npz；
+数据来源：results/improved/ 下的 breakdown.json、tier1.json、multi_seed.json、samples.npz、stage1_swap/、baselines_*_samples.npz、path_error_samples.npz（图 4）；
 图 1、图 2 为示意图，图 2 的拓扑来自算例（以变电站为根的树形布局，横轴为沿馈线到变电站的距离）。
 配色为 dataviz 参考调色板的前几个类别色（按固定顺序分配给方法，不随图变化），同一方法在所有图中颜色与标记一致。
 """
@@ -29,9 +29,9 @@ INK, INK2, GRID, SURF = "#0b0b0b", "#52514e", "#dcdad5", "#ffffff"
 COL = {"本方案": "#2a78d6", "GCN": "#eb6834", "GAT": "#1baf7a", "块稀疏贝叶斯": "#eda100", "PCA+SVM": "#e87ba4", "PCA+随机森林": "#6250d6",
        "神经网络 Top-1": "#8a8984", "物理穷举": "#008300"}
 MK = {"本方案": "o", "GCN": "s", "GAT": "^", "块稀疏贝叶斯": "D", "PCA+SVM": "v", "PCA+随机森林": "P", "神经网络 Top-1": "x", "物理穷举": "+"}
-EN = {"本方案": "Ours", "GCN": "GCN", "GAT": "GAT", "块稀疏贝叶斯": "Block-sparse Bayesian", "PCA+SVM": "PCA+SVM", "PCA+随机森林": "PCA+RF",
+EN = {"本方案": "Ours", "GCN": "GCN", "GAT": "GAT", "块稀疏贝叶斯": "Simplified block-sparse Bayesian", "PCA+SVM": "PCA+SVM", "PCA+随机森林": "PCA+RF",
       "神经网络 Top-1": "Neural network Top-1", "物理穷举": "Exhaustive physics"}
-name = lambda k: ("本方法" if k == "本方案" else k) if zh else EN[k]
+name = lambda k: ("本方法" if k == "本方案" else "简化块稀疏贝叶斯" if k == "块稀疏贝叶斯" else k) if zh else EN[k]
 plt.rcParams.update({
     "font.family": "sans-serif", "font.sans-serif": ["WenQuanYi Zen Hei", "DejaVu Sans"] if zh else ["DejaVu Sans"],
     "axes.unicode_minus": False, "axes.edgecolor": INK2, "axes.labelcolor": INK, "xtick.color": INK2, "ytick.color": INK2, "text.color": INK,
@@ -163,24 +163,14 @@ def fig3():
 
 # ---------------------------------------------------------------- 图 4：测距误差累积分布
 def fig4():
-    ours = np.load(R / "samples.npz")
-    gcn = np.load(R / "stage1_swap/gcn_delta/samples.npz")
-    gp = np.load(R / "stage1_swap/gcn_paper/samples.npz")
-    bs = np.load(R / "baselines_bsbl_samples.npz")
-    gcn_s = np.load(R / "baselines_gcn_samples.npz")
-    from ieee34_bus_impedance import CASES, Network
-    net = Network(case=CASES["ieee34"])
+    pe = np.load(R / "path_error_samples.npz")
     fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.0), sharey=True)
     for ax, sc, ttl in zip(axes, ("域内", "高阻外推"), (T("域内", "In-domain"), T("高阻外推（300–1000 Ω）", "High resistance (300–1000 Ω)"))):
-        n = len(ours[f"{sc}/sec_true"])
-        d_true = ours[f"{sc}/d_true"]
-        mid = np.abs(np.array([net.fault_distance_km(s, 0.5) for s in gcn_s[f"gcn_delta/{sc}/sec"][:n]]) - d_true)
-        curves = [("本方案", ours[f"{sc}/本方案/d_err"], "-"), ("GCN+" + T("物理定位", "physics location"), gcn[f"{sc}/硬串联/d_err"], "--"),
-                  ("GCN (" + T("区段中点", "section midpoint") + ")", mid, ":"), ("块稀疏贝叶斯", bs[f"bsbl/{sc}/d_err"][:n], "-.")]
-        cols = [COL["本方案"], COL["GCN"], COL["GCN"], COL["块稀疏贝叶斯"]]
-        for (lab, e, ls), c in zip(curves, cols):
-            e = np.sort(e)
-            ax.plot(e, np.arange(1, len(e) + 1) / len(e) * 100, color=c, ls=ls, lw=1.8 if lab == "本方案" else 1.3, label=name(lab) if lab in EN else lab)
+        curves = [("本方案", "ours", "-", "本方案"), ("GCN+" + T("物理定位", "physics location"), "gcn_d_phys", "--", "GCN"),
+                  ("GCN (" + T("区段中点", "section midpoint") + ")", "gcn_d_mid", ":", "GCN"), ("块稀疏贝叶斯", "bsbl", "-.", "块稀疏贝叶斯")]
+        for lab, key, ls, c in curves:
+            e = np.sort(pe[f"{sc}/{key}"])
+            ax.plot(e, np.arange(1, len(e) + 1) / len(e) * 100, color=COL[c], ls=ls, lw=1.8 if key == "ours" else 1.3, label=name(lab) if lab in EN else lab)
         ax.set_xlim(0, 8); ax.set_xlabel(T("测距误差 (km)", "Location error (km)")); ax.set_title(ttl, loc="left", fontsize=9)
     axes[0].set_ylabel(T("累积比例 (%)", "Cumulative share (%)"))
     axes[0].legend(fontsize=7, loc="lower right")
