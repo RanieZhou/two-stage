@@ -211,12 +211,16 @@ def appendix_design(d):
     for s in ("域内", "负荷偏移", "高阻外推", "噪声×3", "线路阻抗+10%", "线路阻抗-10%", "个别线路阻抗±20%"):
         rows.append([sc(d, s), f"{no_aug[s][K]['class_acc'] * 100:.1f}", f"{ev[s][K]['class_acc'] * 100:.1f}", f"{ev[s]['联合打分(Top-2,无候选扩展)']['class_acc'] * 100:.1f}", f"{ev[s][K]['class_acc'] * 100:.1f}", f"{ev[s]['联合打分(全区段,参考)']['class_acc'] * 100:.1f}"])
     d.table("A4a", "阻抗扩增训练与候选扩展的作用（IEEE 34，类准确率 %，种子 0）", "Effect of impedance augmentation and candidate expansion (IEEE 34, class accuracy %, seed 0)", hdr, rows)
-    hdr = [t("场景", "Scenario"), t("高置信样本占比 (%)", "High-confidence share (%)"), t("高置信准确率 (%)", "High-confidence accuracy (%)"), t("低置信准确率 (%)", "Low-confidence accuracy (%)"), t("校准误差 ECE", "ECE"), t("告警占比 (%)", "Alarm share (%)")]
+    hdr = [t("系统", "System"), t("场景", "Scenario"), t("高置信样本占比 (%)", "High-confidence share (%)"), t("高置信准确率 (%)", "High-confidence accuracy (%)"), t("低置信准确率 (%)", "Low-confidence accuracy (%)"), t("校准误差 ECE", "ECE"), t("置信度 AUROC", "Confidence AUROC"), t("低置信召回率 (%)", "Low-confidence recall (%)"),
+           t("告警占比 (%)", "Alarm share (%)"), t("告警样本错误率 (%)", "Error rate among alarms (%)"), t("告警召回率 (%)", "Alarm recall (%)"), t("整体错误率 (%)", "Overall error rate (%)")]
     rows = []
-    for s in ("域内", "负荷偏移", "高阻外推", "噪声×3", "个别线路阻抗±20%"):
-        x, r2 = ev[s]["置信度C"], ev[s][K]["rules"]
-        rows.append([sc(d, s), f"{x['高置信占比'] * 100:.0f}", f"{x['高置信准确率'] * 100:.1f}", f"{x['低置信准确率'] * 100:.1f}", f"{x['ECE']:.3f}", f"{r2['2'] * 100:.1f}"])
-    d.table("A4b", "置信度与失配告警（IEEE 34，种子 0；高置信指置信度 ≥ 0.6）", "Confidence and mismatch alarm (IEEE 34, seed 0; high confidence means confidence ≥ 0.6)", hdr, rows)
+    for sysname, ev_, al in (("IEEE 34", ev, J(R34 / "alarm.json")), ("IEEE 123", c["ev123"], J(R123 / "alarm.json"))):
+        for s in ("域内", "负荷偏移", "高阻外推", "噪声×3", "个别线路阻抗±20%"):
+            x, a_ = ev_[s]["置信度C"], al[s]
+            rows.append([sysname, sc(d, s), f"{x['高置信占比'] * 100:.0f}", f"{x['高置信准确率'] * 100:.1f}", f"{x['低置信准确率'] * 100:.1f}", f"{x['ECE']:.3f}", f"{a_['置信度AUROC']:.2f}", f"{a_['低置信召回率'] * 100:.1f}",
+                         f"{a_['告警占比'] * 100:.1f}", f"{a_['告警样本错误率'] * 100:.1f}", f"{a_['告警召回率'] * 100:.1f}", f"{(1 - a_['准确率']) * 100:.1f}"])
+    d.table("A4b", "置信度与失配告警的可靠性（种子 0，错误按等价类判定；高置信指置信度 ≥ 0.6，低置信召回率为全部错误中低置信样本的比例；告警召回率为全部错误中被告警的比例）",
+            "Reliability of the confidence and the mismatch alarm (seed 0, errors judged by equivalence class; high confidence means confidence ≥ 0.6, low-confidence recall is the share of all errors that have low confidence; alarm recall is the share of all errors that raise the alarm)", hdr, rows)
 
 def appendix_baselines(d):
     t = d.t
@@ -322,19 +326,19 @@ def table_main(d):
             [t("场景", "Scenario")] + fam_hdr(d), rows)
 
 
-def table_paired(d):
-    """表 2b：本方法与各场景中均值最高的其余方法的配对比较（种子 0，同一批测试样本）。"""
+def table_paired(d, system="34"):
+    """表 2b（IEEE 34）与表 9b（IEEE 123）：本方法与各场景中均值最高的其余方法的配对比较（种子 0，同一批测试样本）。"""
     t = d.t
-    pt = J(R34 / "paired_tests.json")
+    pt = J((R34 if system == "34" else R123) / "paired_tests.json")
     fmtp = lambda p: "<0.001" if p < 0.001 else f"{p:.3f}"
     rows = []
-    for s in CORE5:
+    for s in [s for s in CORE5 if s in pt]:
         r = pt[s]
         cell = lambda tst: f"{tst['diff']:+.1f} [{tst['lo']:+.1f}, {tst['hi']:+.1f}]"
         rows.append([sc(d, s), mname(d, r["best_other"]), f"{r['ours_class'] * 100:.1f} / {r['other_class'] * 100:.1f}", cell(r["class_test"]), fmtp(r["class_test"]["p"]),
                      f"{r['ours_exact'] * 100:.1f} / {r['other_exact'] * 100:.1f}", cell(r["exact_test"]), fmtp(r["exact_test"]["p"])])
-    d.table("2b", "本方法与各场景中类准确率均值最高的其余方法的配对比较（种子 0，同一批 5000 个测试样本）：本方法 / 对方的准确率（%）、差值（百分点）及配对 bootstrap 95% 置信区间、McNemar 精确检验 p 值；左为等价类准确率，右为精确区段准确率",
-            "Paired comparison of our method with the other method of highest mean class accuracy in each scenario (seed 0, the same 5,000 test samples): accuracy of ours / the other (%), difference (percentage points) with the paired-bootstrap 95% confidence interval, and the exact McNemar p value; class accuracy on the left, exact section accuracy on the right",
+    d.table("2b" if system == "34" else "9b", "本方法与各场景中类准确率均值最高的其余方法的配对比较（种子 0，" + ("同一批 5000 个测试样本" if system == "34" else "同一批测试样本；对方只在保存了种子 0 逐样本预测的方法中取，个别线路阻抗 ±20% 因 GCN 种子 0 未运行该场景而省略") + "）：本方法 / 对方的准确率（%）、差值（百分点）及配对 bootstrap 95% 置信区间、McNemar 精确检验 p 值；左为等价类准确率，右为精确区段准确率",
+            "Paired comparison of our method with the other method of highest mean class accuracy in each scenario (seed 0, " + ("the same 5,000 test samples" if system == "34" else "the same test samples; the other method is taken among those with saved seed-0 per-sample predictions, and the individual-line-impedance ±20% scenario is omitted because GCN did not run it at seed 0") + "): accuracy of ours / the other (%), difference (percentage points) with the paired-bootstrap 95% confidence interval, and the exact McNemar p value; class accuracy on the left, exact section accuracy on the right",
             [t("场景", "Scenario"), t("对方", "Other method"), t("类准确率 本方法/对方", "Class acc. ours/other"), t("差值 [95% CI]", "Difference [95% CI]"), "p",
              t("精确区段 本方法/对方", "Exact acc. ours/other"), t("差值 [95% CI]", "Difference [95% CI]"), "p"], rows)
     return pt
@@ -683,10 +687,16 @@ def results(d):
         f"在 5 个核心场景中，用本方法流程时准确率最高的阶段一依次为：{tl}；默认的轻量 MLP 并不是每个场景下最强的，换用更强的阶段一，流程仍然适用。",
         f"Table 6 plugs the probabilities of GCN, GAT, PCA+SVM and PCA+RF in as stage 1 of our procedure: the joint score and candidate expansion improve on “classifier + physics location” in {cnt['gcn_p']}, {cnt['gcn_d']}, {cnt['gat_p']}, {cnt['gat_d']}, {cnt['svm']} and {cnt['rf']} of the 5 core scenarios (GCN paper input, GCN disturbance input, GAT paper input, GAT disturbance input, PCA+SVM, PCA+RF), so the gain of the procedure does not depend on a specific stage-1 network. "
         f"Among the 5 core scenarios, the stage 1 that gives the highest accuracy with our procedure is, in order: {tl_en}; the default lightweight MLP is not the strongest in every scenario, and a stronger stage 1 can be swapped in while the procedure still applies.") + "\n")
+    alm = J(R34 / "alarm.json")
+    au_lo, au_hi = min(alm[s_]["置信度AUROC"] for s_ in CORE5), max(alm[s_]["置信度AUROC"] for s_ in CORE5)
+    rcs = sorted(alm[s_]["告警召回率"] * 100 for s_ in CORE5)
+    rc_hi, rc_2nd = rcs[-1], rcs[-2]
+    er = [alm[s_]["告警样本错误率"] / (1 - alm[s_]["准确率"]) for s_ in CORE5]
+    a3 = J(R123 / "alarm.json")
     w(t(f"联合决策的前提是两路错误不重合（附录表 A8）：神经网络错时物理穷举对的比例，域内为 {cp['域内']['神经网络错时物理对'] * 100:.0f}%，高阻外推为 {cp['高阻外推']['神经网络错时物理对'] * 100:.0f}%；物理穷举错时神经网络对的比例，域内为 {cp['域内']['物理错时神经网络对'] * 100:.0f}%，高阻外推为 {cp['高阻外推']['物理错时神经网络对'] * 100:.0f}%。"
-        "这不单独证明神经网络下降的原因是特征越出训练范围，间接依据是 GCN 论文输入（故障期间的绝对相量）在高阻外推下下降更多（表 2）。候选扩展只在高阻外推（+2.3 个百分点）与噪声 ×3（+0.9）下有明显作用，置信度与告警的统计见附录表 A4。",
+        f"这不单独证明神经网络下降的原因是特征越出训练范围，间接依据是 GCN 论文输入（故障期间的绝对相量）在高阻外推下下降更多（表 2）。候选扩展只在高阻外推（+2.3 个百分点）与噪声 ×3（+0.9）下有明显作用，置信度与告警的统计见附录表 A4：置信度能在一定程度上区分对错（AUROC 为 {au_lo:.2f}–{au_hi:.2f}，高阻外推下最低），失配告警则几乎不能挑出错误样本（召回率最高 {rc_hi:.1f}%，其余场景不超过 {rc_2nd:.1f}%；告警样本的错误率为整体错误率的 {min(er):.1f}–{max(er):.1f} 倍），它只表示物理模型解释不了量测，不能当作错误预测的检测器（IEEE 34）。IEEE 123 上告警在噪声 ×3 下触发 {a3['噪声×3']['告警占比'] * 100:.0f}%、召回 {a3['噪声×3']['告警召回率'] * 100:.0f}%（残差整体超过标定阈值），在高阻外推下几乎不触发（{a3['高阻外推']['告警占比'] * 100:.1f}%，而准确率只有 {a3['高阻外推']['准确率'] * 100:.1f}%），说明告警反映的是残差是否超过标定阈值，而不是区段判断是否出错。",
         f"The premise of the joint decision is that the errors of the two do not coincide (Table A8): when the neural network is wrong, the exhaustive physics-based inversion is right in {cp['域内']['神经网络错时物理对'] * 100:.0f}% (in-domain) and {cp['高阻外推']['神经网络错时物理对'] * 100:.0f}% (high resistance) of the cases; when the physics-based inversion is wrong, the neural network is right in {cp['域内']['物理错时神经网络对'] * 100:.0f}% and {cp['高阻外推']['物理错时神经网络对'] * 100:.0f}%. "
-        "This does not by itself prove that the decline of the neural network is caused by features leaving the training range; the indirect evidence is that the GCN with the paper input (absolute during-fault phasors) declines more under high resistance (Table 2). Candidate expansion matters clearly only under high resistance (+2.3 percentage points) and noise ×3 (+0.9); statistics on confidence and alarm are in Table A4.") + "\n")
+        f"This does not by itself prove that the decline of the neural network is caused by features leaving the training range; the indirect evidence is that the GCN with the paper input (absolute during-fault phasors) declines more under high resistance (Table 2). Candidate expansion matters clearly only under high resistance (+2.3 percentage points) and noise ×3 (+0.9); statistics on confidence and alarm are in Table A4: the confidence separates correct from wrong decisions to some extent (AUROC {au_lo:.2f}–{au_hi:.2f}, lowest under high resistance), whereas the mismatch alarm hardly picks out the wrong decisions (recall at most {rc_hi:.1f}% and below {rc_2nd:.1f}% in the other scenarios, and the error rate among alarmed samples is {min(er):.1f}–{max(er):.1f} times the overall error rate); it only indicates that the physics model cannot explain the measurements and should not be used as a detector of wrong predictions (IEEE 34). On IEEE 123 the alarm fires for {a3['噪声×3']['告警占比'] * 100:.0f}% of the samples under noise ×3 with a recall of {a3['噪声×3']['告警召回率'] * 100:.0f}% (the residuals as a whole exceed the calibrated threshold) and hardly fires under high resistance ({a3['高阻外推']['告警占比'] * 100:.1f}%, while the accuracy is only {a3['高阻外推']['准确率'] * 100:.1f}%), so the alarm reflects whether the residual exceeds the calibrated threshold, not whether the section decision is wrong.") + "\n")
     # ---- 5.6
     w(t("### 5.6 与结构最接近的 Liang 两阶段方法相比如何？\n", "### 5.6 How does it compare with the structurally closest method of Liang et al.?\n"))
     table_liang(d)
@@ -704,11 +714,21 @@ def results(d):
     # ---- 5.8
     w(t("### 5.8 在 IEEE 123 节点上结论是否成立，计算量如何？\n", "### 5.8 Do the conclusions hold on the IEEE 123-bus system, and what is the computation cost?\n"))
     table_123(d)
+    table_paired(d, "123")
     A3 = c["acc"]["123"]
     v3 = {s: verdict({s: A3[s]}, s) for s in CORE5 if s in A3 and len(A3[s]) > 1}
     win3 = [s for s in v3 if v3[s][0] == "win"]
     tie3 = [s for s in v3 if v3[s][0] == "tie"]
     lose3 = [s for s in v3 if v3[s][0] == "lose"]
+    p3 = J(R123 / "paired_tests.json")
+    ex_in = (p3["域内"]["ours_exact"] * 100, p3["域内"]["ours_class"] * 100)
+    ex_gap = [p3[s_]["exact_test"]["diff"] for s_ in p3]
+    cl_gap = [p3[s_]["class_test"]["diff"] for s_ in p3]
+    sig3 = [s_ for s_ in p3 if p3[s_]["class_test"]["p"] < 0.05 and p3[s_]["class_test"]["diff"] > 0]
+    w(t(f"表 9b 在种子 0 的同一批测试样本上做配对检验：对方是保存了种子 0 逐样本预测的方法中均值最高者（GCN 突变量输入，个别线路阻抗 ±20% 因 GCN 种子 0 没有运行该场景而省略）。类准确率上本方法在 {len(p3)} 个场景中的 {len(sig3)} 个显著更高（{min(cl_gap):+.1f} 到 {max(cl_gap):+.1f} 个百分点）；"
+        f"精确区段准确率上高 {min(ex_gap):.1f}–{max(ex_gap):.1f} 个百分点。需要注意，IEEE 123 的 118 个区段在 8 个测点下只能分成 64 个等价类，精确区段准确率远低于类准确率（域内 {ex_in[0]:.1f}% 对 {ex_in[1]:.1f}%），类准确率不能当作对单个区段的定位能力。",
+        f"Table 9b applies paired tests on the same seed-0 test samples; the other method is the best one among those with saved seed-0 per-sample predictions (GCN with the disturbance input; the individual-line-impedance ±20% scenario is omitted because GCN did not run it at seed 0). In class accuracy our method is significantly higher in {len(sig3)} of {len(p3)} scenarios ({min(cl_gap):+.1f} to {max(cl_gap):+.1f} percentage points); "
+        f"in exact section accuracy it is higher by {min(ex_gap):.1f}–{max(ex_gap):.1f} percentage points. Note that the 118 sections of IEEE 123 fall into only 64 equivalence classes with 8 sensors, so the exact section accuracy is far below the class accuracy ({ex_in[0]:.1f}% against {ex_in[1]:.1f}% in-domain), and the class accuracy must not be read as the ability to locate an individual section.") + "\n")
     a34, e34, a123, e123 = appendix_timing(Doc_dummy(d))
     w(t(f"IEEE 123（118 个区段、8 个测点）上，本方法在 {len(win3)} 个核心场景显著更高（{lst(win3)}），{len(tie3)} 个无显著差别（{lst(tie3)}），{len(lose3)} 个显著更低（{lst(lose3)}）。高阻外推下所有方法都低，该场景的故障信号接近噪声。"
         f"计算量方面，阶段二只对 2 个候选做物理反演：IEEE 34 为 {a34:.1f} ms/样本，全区段物理穷举为 {e34:.0f} ms；IEEE 123 为 {a123:.1f} ms 与 {e123:.0f} ms（附录表 A9）。",
@@ -765,14 +785,16 @@ def discussion(d):
           "（4）过渡电阻 500–1000 Ω 时联合决策仍低于物理穷举，因为 Top-2 候选漏掉真实区段；IEEE 123 上高阻故障的信号接近噪声，所有方法的准确率都低。"
           "（5）没有覆盖分布式电源接入、拓扑重构、数据缺失和小电流接地系统；测点数量的扫描只在 IEEE 34 上做了，测点集合是嵌套的贪心序列，没有比较不同布置。"
           "（6）神经网络下降的原因（特征越出训练范围）只有间接证据。"
-          "（7）默认的轻量 MLP 阶段一在各场景下并不总是最强（表 6），本文没有针对阶段一做进一步的选择或集成。",
+          "（7）默认的轻量 MLP 阶段一在各场景下并不总是最强（表 6），本文没有针对阶段一做进一步的选择或集成。"
+          "（8）失配告警只表示物理模型解释不了量测，召回率很低，不能当作错误预测的检测器；置信度对对错有一定区分能力，但高阻外推下偏弱（附录表 A4b）。",
           "**Limitations.** (1) All results come from OpenDSS simulation; measurement noise and synchronization errors are assumed, there are no field fault data, and the gap between simulation and the field is characterized only indirectly by the model-error scenarios. "
           "(2) Section accuracy is judged on fixed equivalence classes; the exact section accuracy is about 2.5–3.3 percentage points lower (Table A2), but the ranking of the methods is essentially unchanged. "
           "(3) The baselines are our reimplementations from the descriptions in the papers and may differ from the original authors' code: for the method of Liang et al. the stage 1 we reproduced on the IEEE 33-bus system of their paper is below the reported values (Table A3), so the comparison with it represents the reimplementation; our block-sparse Bayesian learning uses a dictionary of positions within sections rather than the node injections of the original paper, does not use its within-block correlation matrix, and its position is limited by a grid; the SVM uses only a 30,000-sample training subset. "
           "(4) At 500–1000 Ω the joint decision is still below the exhaustive physics-based inversion because the Top-2 candidates miss the true section; on IEEE 123 the signal of high-resistance faults is close to the noise and all methods are low. "
           "(5) Distributed generation, topology reconfiguration, missing data and resonant-grounded systems are not covered, and the sweep of the number of sensors was done only on IEEE 34 with a nested greedy sequence of sensors, without comparing different placements. "
           "(6) The cause of the decline of the neural network (features leaving the training range) is supported only indirectly. "
-          "(7) The default lightweight MLP stage 1 is not always the strongest in every scenario (Table 6), and this paper does not select or ensemble stage-1 networks further.\n"))
+          "(7) The default lightweight MLP stage 1 is not always the strongest in every scenario (Table 6), and this paper does not select or ensemble stage-1 networks further. "
+          "(8) The mismatch alarm only indicates that the physics model cannot explain the measurements; its recall is low and it should not be used as a detector of wrong predictions, while the confidence separates correct from wrong decisions to some extent but is weak under high resistance (Table A4b).\n"))
 
 
 def conclusion(d):

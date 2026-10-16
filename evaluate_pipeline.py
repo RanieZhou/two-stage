@@ -382,6 +382,7 @@ def main():
                 samples[f"{name}/{tag_m}/d_err"] = np.abs(distance(net, sec_m, al_m) - ds["d_true"])
                 samples[f"{name}/{tag_m}/alpha"] = al_m
                 samples[f"{name}/{tag_m}/p_err"] = net.path_distance_km(sec_m, al_m, ds["sec"], ds["alpha"])
+            samples[f"{name}/本方案/rule"], samples[f"{name}/本方案/conf"] = r_ours["rule"], r_ours["conf"]
         res["基准1 硬串联"] = summarize(net, top1, al[idx, top1], ds, cls, top1)
         res["基准3 物理穷举"] = summarize(net, pen.argmin(1), al[idx, pen.argmin(1)], ds, cls, top1)
         res["基准4 Oracle"] = summarize(net, ds["sec"], al[idx, ds["sec"]], ds, cls, top1)
